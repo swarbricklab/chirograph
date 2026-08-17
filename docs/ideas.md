@@ -178,10 +178,16 @@ construction, lint, serialisation and load all show ≈4× per 4× n, nothing
 quadratic. At n = 64 000 the whole round trip is ≈7 s, of which the JSON *load*
 is ≈3.7 s and dominates.
 
-That extrapolates to roughly 6 s of parse time at 10⁵ entries — which suggests
-spec §10's ">~10⁵ files" threshold for the JSON-Lines variant is about right, and
-that when it starts to hurt it will be **parse** time, not our canonicalisation.
-Worth re-measuring on a real deposit before acting on it.
+Measured directly at 10⁵ entries afterwards: `load()` takes ≈6.8 s, of which the
+JSON parse dominates. That supports spec §10's ">~10⁵ files" threshold for the
+JSON-Lines variant, and says that when it starts to hurt it will be **parse** time
+rather than our canonicalisation. Worth re-measuring on a real deposit before
+acting on it.
+
+(For reference, moving path and digest validation into `FileEntry.__post_init__`
+cost ≈19% on `load` and ≈7% on in-memory construction at that size, and changed
+nothing about the linearity. Cheap for making it impossible to hold an entry that
+could not be written out and read back.)
 
 Two O(n²) traps to be aware of, both currently avoided but neither enforced:
 `Manifest.entry()` is a linear scan, and `Manifest.by_relpath` rebuilds its dict
