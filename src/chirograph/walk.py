@@ -69,6 +69,12 @@ class WalkReport:
     #: was written on macOS, and the manifest's paths will not be byte-identical
     #: to the names on that disk.
     renormalised: list[str] = field(default_factory=list)
+    #: Names that cannot appear in a manifest at all (non-UTF-8 bytes), recorded
+    #: only when ``skip_unrepresentable`` was set. Kept in their own list rather
+    #: than only in :attr:`skipped` so a caller can act on them — they are by
+    #: definition files no manifest could list, which is what ``verify --strict``
+    #: needs to know.
+    unrepresentable: list[str] = field(default_factory=list)
 
     @property
     def total_size(self) -> int:
@@ -85,6 +91,7 @@ class WalkReport:
             "skipped": [{"path": p, "reason": r} for p, r in self.skipped],
             "empty_dirs": self.empty_dirs,
             "renormalised": self.renormalised,
+            "unrepresentable": self.unrepresentable,
         }
 
 
@@ -115,6 +122,7 @@ def walk_tree(
     include_hidden: bool = True,
     follow_symlinks: bool = False,
     skip_unreadable: bool = False,
+    skip_unrepresentable: bool = False,
 ) -> WalkReport:
     """Walk *root*, returning a deterministic :class:`WalkReport`.
 
@@ -127,6 +135,13 @@ def walk_tree(
     pointing outside the root silently pulls in bytes the caller did not mean to
     publish. File symlinks *are* included, hashed by their target's content,
     which is what DVC does and what a user means by "this file".
+
+    *skip_unrepresentable* records a filename that cannot appear in a manifest at
+    all (non-UTF-8 bytes, which Python surfaces as surrogates) as skipped rather
+    than raising. Off by default, because when *building* a manifest such a file
+    must be a loud error — but a caller that is only *enumerating* names, as
+    ``chiro verify --check-extra`` does, should not discard an otherwise-passing
+    verification because of a stray file the manifest could never have listed.
     """
     base = Path(root)
     if not base.is_dir():
@@ -238,6 +253,10 @@ def walk_tree(
             try:
                 validate_path(normalised)
             except PathSafetyError as exc:
+                if skip_unrepresentable:
+                    report.skipped.append((child_rel, f"not representable in a manifest ({exc})"))
+                    report.unrepresentable.append(child_rel)
+                    continue
                 # Name the file. A filename whose bytes are not valid UTF-8 (which
                 # Python surfaces as surrogates) is the realistic case here, and
                 # "cannot encode" with no path attached is unactionable when the
@@ -256,6 +275,7 @@ def walk_tree(
     report.skipped.sort()
     report.empty_dirs.sort()
     report.renormalised.sort()
+    report.unrepresentable.sort()
     return report
 
 

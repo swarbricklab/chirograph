@@ -50,6 +50,7 @@ __all__ = [
     "FileEntry",
     "Lint",
     "Manifest",
+    "decode_document",
     "dump",
     "dumps",
     "load",
@@ -135,7 +136,44 @@ class FileEntry:
         return self.source_path is not None and self.source_path != self.relpath
 
     def __post_init__(self) -> None:
+        """Validate on construction, not only in :meth:`from_dict`.
+
+        Path safety and digest hygiene used to live in ``from_dict`` alone, so the
+        *producer* side could emit ``relpath="../../etc/passwd"`` or an uppercase
+        digest and only the reader would object — a manifest that fails our own
+        ``chiro validate``. Since ``__post_init__`` also runs for
+        :func:`dataclasses.replace`, this makes it impossible to hold a
+        ``FileEntry`` that could not be written out and read back.
+
+        Digest *length* is not checked here: an entry does not know its manifest's
+        ``hash_algorithm``. Case and hex-ness are, because those are algorithm
+        independent (docs/decisions.md D-18).
+        """
         _reject_shadowing(self.extra, _KNOWN_ENTRY_FIELDS, where="a file entry")
+        object.__setattr__(self, "relpath", validate_path(self.relpath))
+        if self.source_path is not None:
+            object.__setattr__(
+                self, "source_path", validate_path(self.source_path, field="source_path")
+            )
+        if not isinstance(self.md5, str):
+            raise SchemaError(f"md5 must be a string, got {type(self.md5).__name__}")
+        if len(self.md5) not in set(HASH_ALGORITHMS.values()):
+            lengths = " or ".join(str(n) for n in sorted(set(HASH_ALGORITHMS.values())))
+            raise SchemaError(
+                f"md5 {self.md5!r} is {len(self.md5)} characters; supported digests are "
+                f"{lengths} hex characters"
+            )
+        if not all(character in "0123456789abcdef" for character in self.md5):
+            if all(character in "0123456789abcdefABCDEF" for character in self.md5):
+                raise SchemaError(
+                    f"md5 {self.md5!r} is uppercase; digests must be lowercase hexadecimal "
+                    f"(docs/decisions.md D-18). Lower-case it: {self.md5.lower()}"
+                )
+            raise SchemaError(f"md5 {self.md5!r} is not hexadecimal")
+        if isinstance(self.size, bool) or not isinstance(self.size, int):
+            raise SchemaError(f"size must be an integer, got {type(self.size).__name__}")
+        if self.size < 0:
+            raise SchemaError(f"size must not be negative, got {self.size}")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise in the format's field order, omitting absent fields."""
@@ -611,6 +649,8 @@ class Manifest:
 
     @classmethod
     def loads(cls, text: str | bytes, **kwargs: Any) -> Manifest:
+        if isinstance(text, (bytes, bytearray)):
+            text = decode_document(bytes(text))
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
@@ -619,14 +659,8 @@ class Manifest:
 
     @classmethod
     def load(cls, path: str | os.PathLike[str], **kwargs: Any) -> Manifest:
-        raw = Path(path).read_bytes()
-        if raw.startswith(b"\xef\xbb\xbf"):
-            raise SchemaError(
-                f"{path}: manifest starts with a UTF-8 BOM; spec §1.2 requires UTF-8 with no BOM "
-                f"(a BOM also changes the whole-file hash and so the chiro:// reference)"
-            )
         try:
-            return cls.loads(raw, **kwargs)
+            return cls.loads(Path(path).read_bytes(), **kwargs)
         except ManifestError as exc:
             raise type(exc)(f"{path}: {exc}") from exc
 
@@ -642,6 +676,52 @@ class Manifest:
         stem = self.record_accession or "manifest"
         safe = "".join(c if c.isalnum() or c in "-_." else "-" for c in stem).strip("-.")
         return f"{safe or 'manifest'}{MANIFEST_SUFFIX}"
+
+
+#: BOMs we recognise well enough to name in an error. Spec §1.2 permits none of
+#: them; UTF-16/32 are listed because ``json.loads`` on *bytes* will happily
+#: auto-detect and decode them, so silence here means silently accepting a
+#: manifest that is not UTF-8 at all.
+_BOMS: tuple[tuple[bytes, str], ...] = (
+    (b"\x00\x00\xfe\xff", "UTF-32 big-endian"),
+    (b"\xff\xfe\x00\x00", "UTF-32 little-endian"),
+    (b"\xef\xbb\xbf", "UTF-8"),
+    (b"\xfe\xff", "UTF-16 big-endian"),
+    (b"\xff\xfe", "UTF-16 little-endian"),
+)
+
+
+def decode_document(raw: bytes) -> str:
+    """Decode manifest bytes as UTF-8, refusing anything else (spec §1.2).
+
+    The single gate for "are these bytes a manifest at all", so the rule and its
+    message live in one place rather than being restated by each caller.
+
+    Two traps, both of which have bitten:
+
+    * ``json.loads`` accepts *bytes* and auto-detects UTF-16/UTF-32 from their
+      BOMs (RFC 8259 §8.1 notwithstanding). Handing it raw bytes therefore accepts
+      manifests in encodings the spec forbids — and re-encoding a manifest changes
+      its whole-file hash, so a registry would be storing two different objects
+      under one ``chiro://`` reference.
+    * ``UnicodeDecodeError`` is a :class:`ValueError`, not a
+      :class:`json.JSONDecodeError`, so a caller catching only the latter lets a
+      non-UTF-8 body escape as an uncaught error rather than as a finding.
+    """
+    for marker, name in _BOMS:
+        if raw.startswith(marker):
+            raise SchemaError(
+                f"manifest starts with a {name} byte-order mark; spec §1.2 requires UTF-8 "
+                f"with no BOM. A BOM (or a non-UTF-8 encoding) also changes the whole-file "
+                f"hash, and so the chiro:// reference, while leaving the manifest looking "
+                f"identical."
+            )
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SchemaError(
+            f"manifest is not valid UTF-8 ({exc}); spec §1.2 requires UTF-8 with no BOM"
+        ) from exc
 
 
 def _reject_shadowing(extra: Mapping[str, Any], known: frozenset[str], *, where: str) -> None:
@@ -679,7 +759,19 @@ def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     field.
     """
     normalised: list[FileEntry] = []
-    for entry in files:
+    for index, entry in enumerate(files):
+        # Type-check before touching `nfc`, which raises TypeError on a non-string.
+        # The rows only reach canonical.py's own checks *after* this loop, so
+        # normalising first would let a `relpath=123` escape as TypeError rather
+        # than as the SchemaError the rest of the API promises.
+        for name in ("relpath", "source_path"):
+            value = getattr(entry, name)
+            if value is None and name == "source_path":
+                continue
+            if not isinstance(value, str):
+                raise SchemaError(
+                    f"files[{index}]: {name!r} must be a string, got {type(value).__name__}"
+                )
         relpath = nfc(entry.relpath)
         source_path = None if entry.source_path is None else nfc(entry.source_path)
         if relpath != entry.relpath or source_path != entry.source_path:
@@ -689,8 +781,8 @@ def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     # Ordering and duplicate rejection stay in canonical.py, so the on-disk order
     # is provably the order that gets hashed.
     ordered = normalise_entries([entry.to_dict() for entry in normalised])
-    index = {entry.relpath: entry for entry in normalised}
-    return [index[str(row["relpath"])] for row in ordered]
+    by_path = {entry.relpath: entry for entry in normalised}
+    return [by_path[str(row["relpath"])] for row in ordered]
 
 
 def _parse_version(value: object) -> tuple[int, int]:

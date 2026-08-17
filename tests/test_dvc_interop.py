@@ -363,3 +363,74 @@ def test_conflicting_hash_algorithm_is_refused(dvc_repo: Path) -> None:
         manifest_from_dvc(dvc_repo / "data.dvc", hash_algorithm="sha256")
     # Agreeing is fine.
     assert manifest_from_dvc(dvc_repo / "data.dvc", hash_algorithm="md5").manifest
+
+
+def build_sha256_dir_repo(root: Path) -> Path:
+    """A sha256 `.dir`-tracked output, laid out exactly as DVC 3.x does.
+
+    Hand-built because `dvc add` will not produce one locally — DVC uses md5 for
+    local caches — and the point is that our *reading* of the layout is right.
+    """
+    import hashlib
+
+    data = root / "data"
+    (data / "sub").mkdir(parents=True)
+    payload = {"a.txt": b"test\n", "sub/b.txt": b"more\n"}
+    rows = []
+    for rel, content in payload.items():
+        (data / rel).write_bytes(content)
+        rows.append({"sha256": hashlib.sha256(content).hexdigest(), "relpath": rel})
+    rows.sort(key=lambda row: str(row["relpath"]))
+
+    dir_bytes = json.dumps(rows, sort_keys=True).encode()
+    dir_oid = hashlib.sha256(dir_bytes).hexdigest()
+    # DVC shards by algorithm name: cache/files/<algorithm>/ab/cdef…
+    cache = root / ".dvc" / "cache" / "files" / "sha256"
+    (cache / dir_oid[:2]).mkdir(parents=True)
+    (cache / dir_oid[:2] / (dir_oid[2:] + ".dir")).write_bytes(dir_bytes)
+    for content in payload.values():
+        oid = hashlib.sha256(content).hexdigest()
+        (cache / oid[:2]).mkdir(parents=True, exist_ok=True)
+        (cache / oid[:2] / oid[2:]).write_bytes(content)
+
+    dvc_file = root / "data.dvc"
+    dvc_file.write_text(
+        f"outs:\n- sha256: {dir_oid}.dir\n  hash: sha256\n"
+        f"  size: {sum(len(v) for v in payload.values())}\n"
+        f"  nfiles: {len(payload)}\n  path: data\n"
+    )
+    return dvc_file
+
+
+def test_sha256_directory_output_transcribes(tmp_path: Path) -> None:
+    """Deriving the algorithm was only half the job.
+
+    `find_cache_dirs` still offered only `files/md5`, and the `.dir` reader still
+    looked only for a "md5" key — so a sha256 *directory* output (the main case)
+    failed twice over even once the header said sha256.
+    """
+    from chirograph.manifest import Manifest
+
+    dvc_file = build_sha256_dir_repo(tmp_path / "r")
+    result = manifest_from_dvc(dvc_file)
+
+    assert result.manifest.hash_algorithm == "sha256"
+    assert result.manifest.nfiles == 2
+    assert all(len(entry.md5) == 64 for entry in result.manifest.files)
+    assert result.manifest.size == 10
+    # Loadable, and the bytes actually check out.
+    Manifest.loads(result.manifest.to_json())
+    assert verify_tree(result.manifest, dvc_file.parent / "data").ok
+
+
+def test_sha256_cache_shard_is_searched_by_algorithm_name(tmp_path: Path) -> None:
+    from chirograph.dvc import find_cache_dirs
+
+    root = tmp_path / "r"
+    (root / ".dvc").mkdir(parents=True)
+    md5_dirs = [str(p) for p in find_cache_dirs(root, algorithm="md5")]
+    sha_dirs = [str(p) for p in find_cache_dirs(root, algorithm="sha256")]
+    assert any(p.endswith("files/md5") for p in md5_dirs)
+    assert any(p.endswith("files/sha256") for p in sha_dirs)
+    # md5 objects may sit alongside in a migrated repo, so still look there.
+    assert any(p.endswith("files/md5") for p in sha_dirs)

@@ -416,9 +416,19 @@ def verify_tree(
     ]
 
     if check_extra:
-        walked = walk_tree(base, excludes=DEFAULT_EXCLUDES, skip_unreadable=True)
+        # Enumerating names, not building a manifest: a stray file we cannot read
+        # or cannot even represent must not discard an otherwise-passing report.
+        walked = walk_tree(
+            base,
+            excludes=DEFAULT_EXCLUDES,
+            skip_unreadable=True,
+            skip_unrepresentable=True,
+        )
         expected = {relative(entry) for entry in manifest.files}
-        report.extra_files = sorted(set(walked.paths) - expected)
+        # Unrepresentable names are extras too — no manifest could list them — so
+        # `--strict` must still see them even though the walk declined to return
+        # them as ordinary paths.
+        report.extra_files = sorted((set(walked.paths) - expected) | set(walked.unrepresentable))
 
     return report
 

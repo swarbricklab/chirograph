@@ -707,3 +707,61 @@ def test_validate_batch_survives_one_bad_manifest(built: Path, tmp_path: Path, c
     assert code == EXIT_FINDING
     assert out.startswith("OK ")  # the good one is reported first, not lost
     assert "INVALID" in out
+
+
+def test_validate_rejects_every_non_utf8_encoding(built: Path, tmp_path: Path, capsys) -> None:
+    """And `verify` must give the same verdict for the same file."""
+    text = built.read_text(encoding="utf-8")
+    for name, raw in [
+        ("utf16", text.encode("utf-16")),
+        ("utf32", text.encode("utf-32")),
+        ("bom8", b"\xef\xbb\xbf" + text.encode("utf-8")),
+        ("latin1", text.replace("sampleA", "café").encode("latin-1")),
+    ]:
+        target = tmp_path / f"{name}.chiro.json"
+        target.write_bytes(raw)
+        validate_code, _, _ = run(capsys, "validate", str(target))
+        verify_code, _, _ = run(capsys, "verify", str(target))
+        assert validate_code == EXIT_FINDING, name
+        assert verify_code == EXIT_FINDING, name
+
+
+def test_validate_batch_survives_a_non_utf8_manifest(built: Path, tmp_path: Path, capsys) -> None:
+    """A UnicodeDecodeError escaped the per-manifest handler and killed the run."""
+    bad = tmp_path / "latin1.chiro.json"
+    bad.write_bytes(built.read_text(encoding="utf-8").replace("sampleA", "café").encode("latin-1"))
+    code, out, _ = run(capsys, "validate", str(built), str(bad), str(built))
+    assert code == EXIT_FINDING
+    # Every manifest gets a verdict; none is lost to the bad one.
+    assert len([line for line in out.splitlines() if line[:2] in ("OK", "IN")]) == 3
+
+
+def test_check_extra_tolerates_an_unrepresentable_stray_file(tmp_path: Path, capsys) -> None:
+    """It only enumerates names, so it must not discard a passing report.
+
+    Building a manifest from such a tree must still fail loudly, though — the two
+    cases want opposite behaviour, which is why the walk takes a flag.
+    """
+    root = tmp_path / "dep"
+    root.mkdir()
+    (root / "a.txt").write_bytes(b"listed\n")
+    target = tmp_path / "m.chiro.json"
+    assert run(capsys, "write", str(root), "-o", str(target))[0] == EXIT_OK
+
+    try:
+        with open(bytes(root) + b"/caf\xe9.txt", "wb") as handle:
+            handle.write(b"stray\n")
+    except OSError:  # pragma: no cover
+        pytest.skip("filesystem will not create a non-UTF-8 filename")
+
+    # Passes, and names the stray as an extra.
+    code, out, _ = run(capsys, "verify", str(target), "--root", str(root), "--check-extra")
+    assert code == EXIT_OK
+    assert "caf" in out
+
+    # --strict asked for exact correspondence, so an unlistable extra is a failure.
+    code, _, _ = run(capsys, "verify", str(target), "--root", str(root), "--strict")
+    assert code == EXIT_FINDING
+
+    # Writing a manifest of the same tree still refuses.
+    assert run(capsys, "write", str(root), "--stdout")[0] == EXIT_FINDING

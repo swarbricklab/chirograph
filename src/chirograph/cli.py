@@ -32,7 +32,7 @@ from .constants import (
 )
 from .diff import diff_manifests
 from .errors import ChirographError
-from .manifest import Manifest
+from .manifest import Manifest, decode_document
 from .ref import ChiroRef, canonical_ref
 from .rewrite import parse_rules
 from .version import __version__
@@ -784,24 +784,23 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             worst = max(worst, EXIT_ERROR)
             continue
 
-        # A BOM and malformed JSON are *findings* about the document, not tool
-        # failures — `chiro verify` already treated them that way, and the two
-        # commands disagreeing on the exit code for the same file would make a CI
-        # gate's behaviour depend on which one it happened to call.
-        if raw.startswith(b"\xef\xbb\xbf"):
-            entry.update(
-                ok=False,
-                errors=[
-                    "SchemaError: manifest starts with a UTF-8 BOM; spec §1.2 requires "
-                    "UTF-8 with no BOM (a BOM also changes the whole-file hash, and so "
-                    "the chiro:// reference)"
-                ],
-            )
+        # A BOM, a non-UTF-8 body and malformed JSON are all *findings* about the
+        # document, not tool failures — `chiro verify` already treated them that
+        # way, and the two commands disagreeing on the exit code for the same file
+        # would make a CI gate's behaviour depend on which one it happened to call.
+        #
+        # `decode_document` is the shared gate, so `validate` and `load` cannot
+        # drift apart on what counts as a manifest. It also matters that the decode
+        # happens *before* `json.loads`: handing raw bytes to json.loads lets it
+        # auto-detect UTF-16, and a UnicodeDecodeError is a ValueError rather than a
+        # JSONDecodeError, so it would escape this handler and abort the batch.
+        try:
+            document = json.loads(decode_document(raw))
+        except ChirographError as exc:
+            entry.update(ok=False, errors=[f"{type(exc).__name__}: {exc}"])
             reports.append(entry)
             worst = max(worst, EXIT_FINDING)
             continue
-        try:
-            document = json.loads(raw)
         except json.JSONDecodeError as exc:
             entry.update(ok=False, errors=[f"SchemaError: not valid JSON: {exc}"])
             reports.append(entry)

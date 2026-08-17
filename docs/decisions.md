@@ -525,7 +525,16 @@ rule, while accepting both cases without rewriting gives one manifest two
 ``body_hash`` values. Mandating the case is the only option that keeps §4 a pure
 function *and* tells the truth in the error.
 
-No vector changes: all frozen vectors were already lowercase.
+No vector changes: all frozen vectors were already lowercase. The JSON Schema
+likewise needed no change — its `^([0-9a-f]{32}|[0-9a-f]{64})$` patterns were
+already lowercase-only, so only the descriptions were updated. (An earlier commit
+message claimed the schema was newly "enforced"; it was already correct.)
+
+**Not applied to `chiro://` references.** `ChiroRef.parse` still accepts an
+uppercase digest and lower-cases it. That is deliberate rather than an oversight: a
+reference is typed, copied and pasted by humans, and it is *not hashed*, so
+lenience there cannot produce two `body_hash` values for one manifest. The
+divergence D-18 guards against does not exist for references.
 
 ---
 
@@ -640,8 +649,50 @@ your attention:
   when it accepts it (correctly — `isexec` is boolean). See [D-18](#d-18) and
   [D-19](#d-19) for the two that became decisions.
 
-The review also cleared several areas it could not break, which is worth
-recording: no accepted path escapes the import target (fullwidth and division
+### Found by reviewing the fixes
+
+Fixes introduce bugs, so the fix commit got its own adversarial pass. Six more
+findings, two of them **regressions I had just introduced**:
+
+- **A UTF-16 manifest was accepted as valid** (regression). Consolidating the BOM
+  check, I switched `chiro validate` from `read_text(encoding="utf-8")` to
+  `read_bytes()` + `json.loads(raw)` — and `json.loads` accepts *bytes*, happily
+  auto-detecting UTF-16/UTF-32 from their BOMs. So a manifest in an encoding spec
+  §1.2 forbids passed, and `chiro ref` would mint a `chiro://` reference for it.
+  Since re-encoding changes the whole-file hash, a registry would have stored two
+  different objects under one reference. There is now a single
+  `decode_document()` gate that both `validate` and `load` use, so they cannot
+  drift apart again.
+- **A non-UTF-8 body still aborted the whole `validate` batch** (left behind by the
+  previous fix). `UnicodeDecodeError` is a `ValueError`, not a
+  `json.JSONDecodeError`, so it slipped past the handler that was added precisely
+  to keep the batch going.
+- **`normalise_order` leaked `TypeError`** (regression) — the same defect class the
+  previous commit had fixed one instance of. Normalising the path before any type
+  check meant a `relpath=123` never reached canonical.py's check.
+- **sha256 DVC transcription was only half-wired.** Deriving the algorithm from the
+  `.dvc` made sha256 *reachable*, but `find_cache_dirs` still offered only
+  `cache/files/md5` and the `.dir` reader still looked only for an `"md5"` key —
+  so a sha256 **directory** output, the main case, failed twice over. DVC shards
+  the cache by algorithm name and writes the digest under it.
+- **`FileEntry` validated only on read, not on construction.** So the *producer*
+  side could still build `relpath="../../etc/passwd"` or an uppercase digest and
+  write it out; only a reader objected. `__post_init__` now validates, which also
+  covers `dataclasses.replace`.
+- **`verify --check-extra` discarded a passing report** because a stray *unlisted*
+  file had a non-UTF-8 name. It only enumerates names, so the walk now has a
+  `skip_unrepresentable` mode for that caller — while `chiro write` still refuses
+  loudly, since the two want opposite behaviour. Such names are still counted as
+  extras, so `--strict` sees them.
+
+This pass cleared `join_source_url` (400k-case fuzz over hostile bases: no
+authority or scheme drift, and `%` correctly double-encodes so a filename that
+merely *looks* percent-encoded round-trips), the `rewrite.py` split (writer output
+byte-identical across 10 old-vs-new comparisons), `cmd_remap`'s full 6×3 matrix,
+`_SurrogateSafeStream` (including `json.dump`'s many small writes), and
+`verify_entry(root=…)` (no in-tree input can produce a path outside the root).
+
+The first review also cleared several areas, which is worth recording: no accepted path escapes the import target (fullwidth and division
 solidus, `....//`, percent-encoded traversal, overlong components and bidi
 overrides were all tried, and no codepoint's NFC or NFD form contains `/`, `\`,
 `.` or `:` — 38 do under NFKC, which is why using NFC here is right); `paths` and

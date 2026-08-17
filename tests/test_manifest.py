@@ -485,3 +485,86 @@ def test_non_nfc_relpath_with_an_unknown_field_does_not_crash() -> None:
     manifest = Manifest(files=[FileEntry("cafe\u0301.txt", MD5_A, 1, extra={"future_field": 1})])
     assert manifest.files[0].relpath == "caf\u00e9.txt"  # folded to NFC
     assert manifest.files[0].extra == {"future_field": 1}
+
+
+# --------------------------------------------------------------------------- #
+# Regressions from the second review pass
+# --------------------------------------------------------------------------- #
+
+
+def reencoded(manifest_path: Path, encoding: str, bom: bytes = b"") -> bytes:
+    return bom + manifest_path.read_text(encoding="utf-8").encode(encoding)
+
+
+def test_non_utf8_encodings_are_refused(tmp_path: Path) -> None:
+    """`json.loads` accepts *bytes* and auto-detects UTF-16/32 from their BOMs.
+
+    So reading the file as bytes and handing them straight to json.loads silently
+    accepted manifests in encodings spec §1.2 forbids — and a re-encoded manifest
+    has a different whole-file hash, so a registry would store two objects under
+    one chiro:// reference.
+    """
+    good = sample().dump(tmp_path / "good.chiro.json")
+    for encoding, bom in [
+        ("utf-16", b""),  # codec emits its own BOM
+        ("utf-16-be", b"\xfe\xff"),
+        ("utf-32", b""),
+        ("utf-8", b"\xef\xbb\xbf"),
+    ]:
+        target = tmp_path / f"{encoding}.chiro.json"
+        target.write_bytes(reencoded(good, encoding, bom))
+        with pytest.raises(SchemaError, match=r"UTF-8|byte-order mark"):
+            Manifest.load(target)
+
+
+def test_non_utf8_body_is_a_schema_error_not_a_value_error(tmp_path: Path) -> None:
+    """UnicodeDecodeError is a ValueError, not a JSONDecodeError.
+
+    A caller catching only the latter let a latin-1 body escape as an uncaught
+    error, which aborted a whole `chiro validate` batch.
+    """
+    target = tmp_path / "latin1.chiro.json"
+    target.write_bytes(sample().to_json().replace("sampleA", "caf\u00e9").encode("latin-1"))
+    with pytest.raises(SchemaError, match="not valid UTF-8"):
+        Manifest.load(target)
+
+
+def test_entry_validates_on_construction_not_only_on_read() -> None:
+    """The producer side used to be able to emit paths that never saw validation."""
+    for kwargs in (
+        {"relpath": "../../etc/passwd", "md5": MD5_A, "size": 1},
+        {"relpath": "ok.txt", "md5": MD5_A, "size": 1, "source_path": "/abs/leak"},
+        {"relpath": "ok.txt", "md5": MD5_A.upper(), "size": 1},
+        {"relpath": "ok.txt", "md5": "z" * 32, "size": 1},
+        {"relpath": "ok.txt", "md5": "abc", "size": 1},
+        {"relpath": "ok.txt", "md5": MD5_A, "size": -1},
+        {"relpath": "ok.txt", "md5": MD5_A, "size": True},
+        {"relpath": 123, "md5": MD5_A, "size": 1},
+    ):
+        with pytest.raises((SchemaError, PathSafetyError)):
+            FileEntry(**kwargs)  # type: ignore[arg-type]
+
+
+def test_entry_construction_normalises_to_nfc() -> None:
+    assert FileEntry("cafe\u0301.txt", MD5_A, 1).relpath == "caf\u00e9.txt"
+
+
+def test_replace_still_revalidates() -> None:
+    from dataclasses import replace
+
+    entry = FileEntry("ok.txt", MD5_A, 1)
+    assert replace(entry, size=2).size == 2
+    with pytest.raises(PathSafetyError):
+        replace(entry, relpath="../escape")
+
+
+def test_non_string_relpath_is_a_schema_error_in_normalise_order() -> None:
+    """normalise_order called nfc() before any type check, leaking TypeError."""
+    from chirograph.manifest import normalise_order
+
+    class Sneaky(FileEntry):
+        def __post_init__(self) -> None:  # bypass the constructor's validation
+            pass
+
+    with pytest.raises(SchemaError, match="must be a string"):
+        normalise_order([Sneaky(relpath=123, md5=MD5_A, size=1)])  # type: ignore[arg-type]

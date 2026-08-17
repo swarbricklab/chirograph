@@ -104,9 +104,22 @@ variant is **deferred** (see §10) — it would break the DVC-`.dir` equivalence
 complicate the body hash, so it is not worth adopting until a real deposit's file
 count makes JSON parse-time hurt (realistically >~10^5 files).
 
-A leading UTF-8 BOM is a hard error, not something to strip: it would change the
-whole-file hash and therefore the `chiro://` reference (§4 Layer 3) while leaving
-the manifest looking identical.
+**A manifest MUST be UTF-8 with no byte-order mark, and a reader MUST reject
+anything else** rather than decode it. *(v0.3, tightened.)* This is not pedantry
+about encodings — re-encoding or BOM-prefixing a manifest changes its whole-file
+hash, and therefore its `chiro://` reference (§4 Layer 3), while leaving it looking
+identical. A registry that accepted both spellings would be storing two distinct
+objects under one reference.
+
+Two specific traps for implementers:
+
+- Python's `json.loads` accepts **bytes** and auto-detects UTF-16/UTF-32 from their
+  BOMs. Passing raw bytes to it therefore accepts encodings this section forbids.
+  Decode as UTF-8 explicitly first, and refuse on failure.
+- A decode failure is a *finding about the document* (the manifest is invalid), not
+  a tool failure. In Python specifically, `UnicodeDecodeError` is a `ValueError`
+  and **not** a `json.JSONDecodeError`, so a handler that catches only the latter
+  will let it escape as an unexpected error.
 
 ---
 

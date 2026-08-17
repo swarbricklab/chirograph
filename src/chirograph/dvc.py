@@ -237,17 +237,27 @@ def _configured_cache_dir(dvc_root: Path) -> Path | None:
     return None
 
 
-def find_cache_dirs(dvc_root: Path, extra: Iterable[Path] = ()) -> list[Path]:
+def find_cache_dirs(
+    dvc_root: Path, extra: Iterable[Path] = (), algorithm: str = _PLAIN
+) -> list[Path]:
     """Candidate cache roots, most likely first.
 
-    Both the DVC 3.x layout (``cache/files/md5``) and the 2.x one (``cache``) are
-    returned, because a repo may have been migrated and still hold objects under
-    the old paths.
+    Both the DVC 3.x layout (``cache/files/<algorithm>``) and the 2.x one
+    (``cache``) are returned, because a repo may have been migrated and still hold
+    objects under the old paths.
+
+    *algorithm* selects the 3.x shard directory. DVC names it after the hash, so a
+    sha256-tracked output lives under ``cache/files/sha256`` — hard-coding ``md5``
+    here made sha256 directory outputs unfindable even once the algorithm was being
+    read correctly from the ``.dvc``.
     """
     candidates: list[Path] = [Path(p) for p in extra]
     configured = _configured_cache_dir(dvc_root)
     for base in filter(None, [configured, dvc_root / ".dvc" / "cache"]):
-        candidates.append(base / "files" / "md5")  # DVC 3.x
+        candidates.append(base / "files" / algorithm)  # DVC 3.x
+        if algorithm != _PLAIN:
+            # A repo may hold md5 objects alongside, and looking costs one stat.
+            candidates.append(base / "files" / _PLAIN)
         candidates.append(base)  # DVC 2.x
     seen: set[Path] = set()
     ordered: list[Path] = []
@@ -355,31 +365,31 @@ def manifest_from_dvc(
             f"no .dvc directory found at or above {target.parent}; "
             f"pass --cache-dir to point at the cache explicitly"
         )
-    caches = find_cache_dirs(dvc_root, extra=[Path(p) for p in cache_dirs])
+    caches = find_cache_dirs(dvc_root, extra=[Path(p) for p in cache_dirs], algorithm=recorded)
 
     workspace = (
         Path(workspace_root) if workspace_root is not None else (target.resolve().parent / out.path)
     )
 
-    notes: list[str] = []
-    if out.is_dir:
-        entries, size_source, more = _entries_for_directory(
-            out, caches, workspace, prefer_workspace_sizes
-        )
-    else:
-        entries, size_source, more = _entries_for_file(
-            out, caches, workspace, prefer_workspace_sizes
-        )
-    notes.extend(more)
-
-    # Validate the transcribed digests against the algorithm rather than trusting
-    # the `.dvc`, and fail here with the file named. Emitting a manifest that our
-    # own `chiro validate` rejects is worse than refusing to write one.
-    for entry in entries:
-        try:
+    # Building the entries validates them: FileEntry checks paths and digest
+    # hygiene on construction, and check_digest below checks the length against the
+    # algorithm the `.dvc` declared (which FileEntry cannot know). Both are wrapped
+    # so the message names the file the user pointed at rather than surfacing a
+    # SchemaError from deep inside — and so nothing is ever written. Emitting a
+    # manifest that our own `chiro validate` rejects is worse than refusing.
+    try:
+        if out.is_dir:
+            entries, size_source, notes = _entries_for_directory(
+                out, caches, workspace, prefer_workspace_sizes, recorded
+            )
+        else:
+            entries, size_source, notes = _entries_for_file(
+                out, caches, workspace, prefer_workspace_sizes
+            )
+        for entry in entries:
             check_digest(entry.md5, recorded, field=f"{entry.relpath} digest")
-        except SchemaError as exc:
-            raise DvcError(f"{target}: {exc}") from exc
+    except SchemaError as exc:
+        raise DvcError(f"{target}: {exc}") from exc
 
     if out.nfiles is not None and out.nfiles != len(entries):
         notes.append(
@@ -429,6 +439,7 @@ def _entries_for_directory(
     caches: Sequence[Path],
     workspace: Path,
     prefer_workspace_sizes: bool,
+    algorithm: str = _PLAIN,
 ) -> tuple[list[FileEntry], str, list[str]]:
     """A ``.dvc`` tracking a directory, via its ``.dir`` cache object."""
     dir_object = _cache_object(caches, out.oid, suffix=".dir")
@@ -452,10 +463,19 @@ def _entries_for_directory(
     for index, row in enumerate(listing):
         if not isinstance(row, dict):
             raise DvcError(f"{dir_object}: entry {index} is not an object")
+        # DVC writes the digest under a key named after the hash
+        # (`HashInfo.to_dict()` → {hi.name: hi.value}), so a sha256 `.dir` says
+        # "sha256". Same convention FileEntry.from_dict already accommodates.
         digest = row.get("md5")
+        if digest is None and algorithm != _PLAIN:
+            digest = row.get(algorithm)
         raw_relpath = row.get("relpath")
         if not isinstance(digest, str) or not isinstance(raw_relpath, str):
-            raise DvcError(f"{dir_object}: entry {index} lacks md5/relpath")
+            keys = ", ".join(sorted(map(str, row))) or "(none)"
+            raise DvcError(
+                f"{dir_object}: entry {index} has no string {algorithm!r} (or 'md5') and "
+                f"'relpath'; keys present: {keys}"
+            )
         relpath = validate_path(raw_relpath, field=f"{dir_object.name}[{index}].relpath")
 
         declared = row.get("size") if isinstance(row.get("size"), int) else None
