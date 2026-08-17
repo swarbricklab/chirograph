@@ -60,8 +60,31 @@ def human_bytes(count: int) -> str:
     return f"{count} ({value:.1f} {units[index]})" if index else f"{count} B"
 
 
+def _json_safe(value: object) -> object:
+    """Replace unpaired surrogates with a literal, escapable spelling.
+
+    A filename whose bytes are not valid UTF-8 arrives as surrogates, and a
+    surrogate cannot appear in a JSON document at all: RFC 8259 forbids it, Go's
+    ``encoding/json`` silently substitutes U+FFFD, and ``serde_json`` errors. So
+    emitting one produces output that a CI gate written in another language either
+    mangles or rejects — worse than the hard failure it replaced.
+
+    ``backslashreplace`` turns each surrogate into the *characters* ``\\udcff``,
+    including a real backslash, which ``json.dumps`` then escapes to ``\\\\udcff``.
+    The result is valid JSON, unambiguous, and still recognisably the offending
+    filename.
+    """
+    if isinstance(value, str):
+        return value.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(value, dict):
+        return {str(_json_safe(k)): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def emit_json(payload: object, stream: TextIO) -> None:
-    json.dump(payload, stream, indent=2, ensure_ascii=False, default=str)
+    json.dump(_json_safe(payload), stream, indent=2, ensure_ascii=False, default=str)
     stream.write("\n")
 
 
@@ -474,6 +497,15 @@ def _add_ref(subparsers: Any) -> None:
     parser.add_argument(
         "--check", metavar="REF", help="verify the manifest matches REF; exit 1 if not"
     )
+    parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help=(
+            "skip confirming the file is a valid manifest before minting a reference. "
+            "Only for hashing a file you already know is one — a reference asserts "
+            "'this is manifest X', so by default that is checked."
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     parser.set_defaults(func=cmd_ref)
 
@@ -776,10 +808,20 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     for name in args.manifest:
         entry: dict[str, object] = {"path": name}
         try:
-            raw = Path(name).read_bytes()
+            target = Path(name)
+            # Refuse anything that is not a regular file *before* opening it. Reading
+            # a FIFO blocks forever, which in CI is a hung job rather than a failed
+            # one; a directory or device is equally not a manifest.
+            if target.is_dir():
+                raise OSError(f"{name} is a directory")
+            if target.exists() and not target.is_file():
+                raise OSError(f"{name} is not a regular file")
+            raw = target.read_bytes()
         except OSError as exc:
-            # Cannot read the file: a tool failure, not a verdict on the manifest.
-            entry.update(ok=False, errors=[f"unreadable: {exc}"])
+            # Cannot read the file: a tool failure, not a verdict on the manifest, so
+            # it is reported as an error rather than as INVALID (docs/decisions.md
+            # D-16).
+            entry.update(ok=False, unreadable=True, errors=[f"unreadable: {exc}"])
             reports.append(entry)
             worst = max(worst, EXIT_ERROR)
             continue
@@ -794,6 +836,11 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         # happens *before* `json.loads`: handing raw bytes to json.loads lets it
         # auto-detect UTF-16, and a UnicodeDecodeError is a ValueError rather than a
         # JSONDecodeError, so it would escape this handler and abort the batch.
+        # `ValueError` rather than `json.JSONDecodeError`: json.loads raises plain
+        # ValueError for an integer past the 4300-digit conversion limit, and
+        # RecursionError for a deeply-nested array. Both are properties of the
+        # document, so both belong here — catching only JSONDecodeError left them
+        # aborting the batch, which is the exact defect this handler exists to fix.
         try:
             document = json.loads(decode_document(raw))
         except ChirographError as exc:
@@ -801,7 +848,7 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             reports.append(entry)
             worst = max(worst, EXIT_FINDING)
             continue
-        except json.JSONDecodeError as exc:
+        except (ValueError, RecursionError) as exc:
             entry.update(ok=False, errors=[f"SchemaError: not valid JSON: {exc}"])
             reports.append(entry)
             worst = max(worst, EXIT_FINDING)
@@ -833,7 +880,12 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         emit_json({"ok": worst == EXIT_OK, "manifests": reports}, out)
     else:
         for entry in reports:
-            status = "OK" if entry["ok"] else "INVALID"
+            if entry["ok"]:
+                status = "OK"
+            elif entry.get("unreadable"):
+                status = "ERROR"  # the tool could not read it; not a verdict
+            else:
+                status = "INVALID"
             out.write(f"{status} {entry['path']}\n")
             for message in _as_messages(entry.get("errors")):
                 out.write(f"  error: {message}\n")
@@ -954,6 +1006,14 @@ def cmd_ref(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         manifest = Manifest.load(path)
         reference = canonical_ref(manifest, args.algorithm)
     else:
+        # Confirm the file *is* a manifest before minting a reference to it. The
+        # reference asserts "this is manifest X"; producing one for a UTF-16 file or
+        # a truncated JSON blob would let a registry store something that is not a
+        # manifest under a chiro:// address — the very failure mode the encoding
+        # rule (spec §1.2) exists to prevent. `ChiroRef.for_path` stays a pure
+        # byte-level hash, because that is the right primitive for a library.
+        if not args.no_validate:
+            Manifest.load(path)
         reference = ChiroRef.for_path(path, args.algorithm)
 
     if args.check:

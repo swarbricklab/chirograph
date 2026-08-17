@@ -340,3 +340,47 @@ def test_nfd_filename_produces_a_note(tree: Path) -> None:
     assert any("NFC" in note for note in result.notes)
     assert result.manifest.entry(nfc) is not None
     assert nfd not in [e.relpath for e in result.manifest.files]
+
+
+def test_unrepresentable_only_directory_is_not_reported_empty(tmp_path: Path) -> None:
+    """It holds a file we declined to list, which is not the same as being empty.
+
+    Only matters for a library caller acting on the walk report, but "expect nothing
+    here" is the wrong thing to tell one.
+    """
+    root = tmp_path / "tree"
+    (root / "onlybad").mkdir(parents=True)
+    (root / "ok.txt").write_bytes(b"x\n")
+    try:
+        with open(bytes(root / "onlybad") + b"/\xff.dat", "wb") as handle:
+            handle.write(b"x\n")
+    except OSError:  # pragma: no cover
+        pytest.skip("filesystem will not create a non-UTF-8 filename")
+
+    report = walk_tree(root, skip_unrepresentable=True)
+    assert report.paths == ["ok.txt"]
+    assert len(report.unrepresentable) == 1
+    assert "onlybad" not in report.empty_dirs
+
+
+def test_skip_unrepresentable_covers_more_than_surrogates(tmp_path: Path) -> None:
+    """The flag catches anything validate_path refuses, as its docstring now says."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "ok.txt").write_bytes(b"x\n")
+    made = 0
+    for raw in (rb"back\\slash.dat", b"new\nline.dat"):
+        try:
+            with open(bytes(root) + b"/" + raw, "wb") as handle:
+                handle.write(b"x\n")
+            made += 1
+        except OSError:  # pragma: no cover
+            pass
+    if not made:  # pragma: no cover
+        pytest.skip("filesystem will not create these names")
+
+    with pytest.raises(ChirographError):
+        walk_tree(root)
+    report = walk_tree(root, skip_unrepresentable=True)
+    assert report.paths == ["ok.txt"]
+    assert len(report.unrepresentable) == made

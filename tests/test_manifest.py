@@ -558,13 +558,20 @@ def test_replace_still_revalidates() -> None:
         replace(entry, relpath="../escape")
 
 
-def test_non_string_relpath_is_a_schema_error_in_normalise_order() -> None:
-    """normalise_order called nfc() before any type check, leaking TypeError."""
-    from chirograph.manifest import normalise_order
+def test_non_string_relpath_is_rejected_by_the_constructor() -> None:
+    """Where the "normalise_order leaks TypeError" fix ended up.
 
-    class Sneaky(FileEntry):
-        def __post_init__(self) -> None:  # bypass the constructor's validation
-            pass
+    Adding validation to ``__post_init__`` in the same commit made the
+    ``normalise_order`` type check unreachable — no public API can get a
+    non-string ``relpath`` past the constructor — so that branch was removed and
+    this is the behaviour that actually holds. It is a ``PathSafetyError``, not the
+    ``SchemaError`` the removed branch raised.
+    """
+    with pytest.raises(PathSafetyError, match="must be a string"):
+        FileEntry(relpath=123, md5=MD5_A, size=1)  # type: ignore[arg-type]
 
-    with pytest.raises(SchemaError, match="must be a string"):
-        normalise_order([Sneaky(relpath=123, md5=MD5_A, size=1)])  # type: ignore[arg-type]
+    # And through the loader, where the field name is reported.
+    payload = document()
+    payload["files"] = [{"relpath": 123, "md5": MD5_A, "size": 6}]
+    with pytest.raises(PathSafetyError, match=r"files\[0\]\.relpath"):
+        Manifest.from_dict(payload)

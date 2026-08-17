@@ -184,10 +184,16 @@ JSON-Lines variant, and says that when it starts to hurt it will be **parse** ti
 rather than our canonicalisation. Worth re-measuring on a real deposit before
 acting on it.
 
-(For reference, moving path and digest validation into `FileEntry.__post_init__`
-cost ≈19% on `load` and ≈7% on in-memory construction at that size, and changed
-nothing about the linearity. Cheap for making it impossible to hold an entry that
-could not be written out and read back.)
+(Moving path and digest validation into `FileEntry.__post_init__` cost ≈32% on
+`load` and ≈4× on bare `FileEntry(...)` construction, and changed nothing about the
+linearity. An earlier note here said "≈19% on load and ≈7% on construction" — the
+7% figure measured `Manifest(files=already_built_entries)`, which is precisely the
+path that *excludes* the changed constructor, so it was meaningless. The 4× is
+because `from_dict` validates and then `__post_init__` validates again; the
+duplication is deliberate defence in depth, and `from_dict`'s better error messages
+— which carry the `files[N]` prefix — win because they run first. Worth revisiting
+only if a real deposit makes `load` the bottleneck; hashing dominates by orders of
+magnitude today.)
 
 Two O(n²) traps to be aware of, both currently avoided but neither enforced:
 `Manifest.entry()` is a linear scan, and `Manifest.by_relpath` rebuilds its dict

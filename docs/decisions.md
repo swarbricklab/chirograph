@@ -692,6 +692,49 @@ byte-identical across 10 old-vs-new comparisons), `cmd_remap`'s full 6×3 matrix
 `_SurrogateSafeStream` (including `json.dump`'s many small writes), and
 `verify_entry(root=…)` (no in-tree input can produce a path outside the root).
 
+### Found by reviewing the fixes-for-fixes
+
+A third pass found **no regressions** — every `FileEntry` construction site,
+`copy`/`pickle`/`replace` round-trips, and a 25-command CLI sweep were byte-identical
+before and after. It did find seven defects of a different kind, all fixed:
+
+- **`chiro ref` still minted a reference for a non-UTF-8 manifest** — the exact hole
+  the previous commit's message claimed to have closed. `validate` was fixed;
+  `chiro ref`, the one command whose whole job is producing the reference a registry
+  keys on, still hashed raw bytes. It now confirms the file is a manifest first,
+  with `--no-validate` as the escape hatch. `ChiroRef.for_path` stays a pure byte
+  hash, which is the right primitive for a library.
+- **`--json` emitted unpaired surrogates.** The `skip_unrepresentable` fix made a
+  report possible where previously there was none, and that report could contain a
+  filename with no valid UTF-8. RFC 8259 forbids unpaired surrogates: Go's
+  `encoding/json` silently substitutes U+FFFD and `serde_json` errors, so a CI gate
+  in another language got a mangled or rejected document where it used to get a
+  visible failure. Strings are now escaped to a literal `\udcff` spelling that is
+  valid JSON.
+- **Two fixes in one commit collided.** Adding validation to `__post_init__` made
+  the `normalise_order` type-check — the fix the *same* commit advertised —
+  unreachable through any public API, and changed the user-visible error from the
+  intended `SchemaError` to `PathSafetyError`. The dead branch is removed and the
+  test that needed a subclass hack to reach it now asserts what actually holds.
+- **`__post_init__`'s docstring contradicted its own code** six lines later,
+  claiming digest length was not checked when it is. Corrected, and the
+  per-construction `set()` build hoisted to a module constant.
+- **The "keep the batch going" handler was still narrow.** `json.loads` raises plain
+  `ValueError` for an integer past the 4300-digit limit and `RecursionError` for a
+  deeply-nested array; both aborted the batch. Same defect class the previous commit
+  spent a bullet closing one instance of.
+- **`chiro validate` hung forever on a FIFO**, which in CI is a hung job rather than
+  a failed one. Non-regular files are now refused before being opened. Relatedly,
+  tool failures were labelled `INVALID <path>`, which reads as a verdict on the
+  manifest; they now say `ERROR`.
+- **`skip_unrepresentable`'s docstring over-claimed** (it catches anything
+  `validate_path` refuses, not only surrogates), and a directory whose only content
+  was such a file was reported as empty.
+
+Also confirmed by that pass: nothing is O(n²), and BOM-less UTF-16 input now fails
+at the JSON parse where it previously *loaded* — closing a hole the commit had not
+even claimed.
+
 The first review also cleared several areas, which is worth recording: no accepted path escapes the import target (fullwidth and division
 solidus, `....//`, percent-encoded traversal, overlong components and bidi
 overrides were all tried, and no codepoint's NFC or NFD form contains `/`, `\`,

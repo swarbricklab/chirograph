@@ -58,6 +58,10 @@ __all__ = [
     "normalise_order",
 ]
 
+#: Digest lengths any supported algorithm can produce. Precomputed because it is
+#: consulted on every FileEntry construction.
+_DIGEST_LENGTHS = frozenset(HASH_ALGORITHMS.values())
+
 _KNOWN_ENTRY_FIELDS = frozenset(ENTRY_FIELD_ORDER)
 _KNOWN_HEADER_FIELDS = frozenset([*HEADER_FIELD_ORDER, "files"])
 
@@ -145,9 +149,12 @@ class FileEntry:
         :func:`dataclasses.replace`, this makes it impossible to hold a
         ``FileEntry`` that could not be written out and read back.
 
-        Digest *length* is not checked here: an entry does not know its manifest's
-        ``hash_algorithm``. Case and hex-ness are, because those are algorithm
-        independent (docs/decisions.md D-18).
+        Digest length is checked against the *set* of supported lengths, not against
+        a specific algorithm — an entry does not know its manifest's
+        ``hash_algorithm``, so a 32-character digest passes here and only
+        :meth:`Manifest.from_dict` / :func:`chirograph.dvc.manifest_from_dvc` can
+        catch it being wrong for a ``sha256`` manifest. Case and hex-ness are checked
+        outright, being algorithm-independent (docs/decisions.md D-18).
         """
         _reject_shadowing(self.extra, _KNOWN_ENTRY_FIELDS, where="a file entry")
         object.__setattr__(self, "relpath", validate_path(self.relpath))
@@ -157,8 +164,8 @@ class FileEntry:
             )
         if not isinstance(self.md5, str):
             raise SchemaError(f"md5 must be a string, got {type(self.md5).__name__}")
-        if len(self.md5) not in set(HASH_ALGORITHMS.values()):
-            lengths = " or ".join(str(n) for n in sorted(set(HASH_ALGORITHMS.values())))
+        if len(self.md5) not in _DIGEST_LENGTHS:
+            lengths = " or ".join(str(n) for n in sorted(_DIGEST_LENGTHS))
             raise SchemaError(
                 f"md5 {self.md5!r} is {len(self.md5)} characters; supported digests are "
                 f"{lengths} hex characters"
@@ -758,20 +765,14 @@ def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     exactly the combination of a non-NFC path and a forward-compatible unknown
     field.
     """
+    # No type-checking loop here: `FileEntry.__post_init__` validates paths on
+    # construction, so by the time an entry reaches this function its `relpath` is
+    # a validated NFC string. An earlier version checked types here as well; that
+    # branch became unreachable through any public API the moment the constructor
+    # started validating, and only a subclass that disables __post_init__ could
+    # reach it. Two fixes collided and this was the redundant one.
     normalised: list[FileEntry] = []
-    for index, entry in enumerate(files):
-        # Type-check before touching `nfc`, which raises TypeError on a non-string.
-        # The rows only reach canonical.py's own checks *after* this loop, so
-        # normalising first would let a `relpath=123` escape as TypeError rather
-        # than as the SchemaError the rest of the API promises.
-        for name in ("relpath", "source_path"):
-            value = getattr(entry, name)
-            if value is None and name == "source_path":
-                continue
-            if not isinstance(value, str):
-                raise SchemaError(
-                    f"files[{index}]: {name!r} must be a string, got {type(value).__name__}"
-                )
+    for entry in files:
         relpath = nfc(entry.relpath)
         source_path = None if entry.source_path is None else nfc(entry.source_path)
         if relpath != entry.relpath or source_path != entry.source_path:
