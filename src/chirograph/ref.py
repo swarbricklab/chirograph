@@ -54,6 +54,7 @@ __all__ = [
     "ChiroRef",
     "canonical_document_bytes",
     "canonical_ref",
+    "load_and_check",
     "shard_path",
 ]
 

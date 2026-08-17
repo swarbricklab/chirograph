@@ -54,6 +54,7 @@ __all__ = [
     "dumps",
     "load",
     "loads",
+    "normalise_order",
 ]
 
 _KNOWN_ENTRY_FIELDS = frozenset(ENTRY_FIELD_ORDER)

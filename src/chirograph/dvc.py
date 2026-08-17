@@ -52,6 +52,7 @@ __all__ = [
     "DvcOut",
     "DvcTranscription",
     "find_cache_dirs",
+    "find_dvc_root",
     "manifest_from_dvc",
     "read_dvc_file",
 ]

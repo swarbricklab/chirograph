@@ -27,6 +27,7 @@ __all__ = [
     "hash_bytes",
     "hash_file",
     "hash_files",
+    "hash_stream",
     "new_hasher",
 ]
 

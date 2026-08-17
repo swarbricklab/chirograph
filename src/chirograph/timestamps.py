@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from .errors import SchemaError
 
-__all__ = ["format_timestamp", "now_timestamp", "parse_timestamp"]
+__all__ = ["canonical_timestamp", "format_timestamp", "now_timestamp", "parse_timestamp"]
 
 
 def now_timestamp() -> str:
