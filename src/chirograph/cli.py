@@ -891,8 +891,13 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 
 def cmd_info(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     path = Path(args.manifest)
-    manifest = Manifest.load(path)
-    reference = ChiroRef.for_path(path, manifest.hash_algorithm)
+    # One read. Reading twice was harmless only while special files were refused:
+    # once pipes were allowed again (D-20), the first read drained the pipe and the
+    # second returned nothing, so `reference` became md5 of the empty string — a
+    # wrong chiro:// address in an otherwise-correct report, at exit 0.
+    raw = read_manifest_bytes(path)
+    manifest = loads_named(raw, path)
+    reference = ChiroRef.for_bytes(raw, manifest.hash_algorithm)
     payload: dict[str, object] = {
         "path": str(path),
         "schema_version": manifest.schema_version,
@@ -995,29 +1000,67 @@ def cmd_diff(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     return EXIT_OK
 
 
+def loads_named(raw: bytes, path: Path) -> Manifest:
+    """Parse *raw*, prefixing errors with *path*.
+
+    `Manifest.load` does this, but it also re-reads the file. Parsing bytes we
+    already hold keeps the single read (no TOCTOU) while keeping the filename in the
+    message, which matters when looping over many manifests.
+    """
+    try:
+        return Manifest.loads(raw)
+    except ChirographError as exc:
+        raise type(exc)(f"{path}: {exc}") from exc
+
+
+def load_manifest_named(path: Path) -> Manifest:
+    """Load from *path* with a single read, errors prefixed with the filename."""
+    return loads_named(read_manifest_bytes(path), path)
+
+
 def cmd_ref(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     path = Path(args.manifest)
-    if args.canonical and args.no_validate:
-        # --canonical has to parse the manifest to canonicalise it, so the flag
-        # cannot be honoured. Saying so beats accepting and ignoring it.
-        err.write("--canonical requires parsing the manifest, so --no-validate cannot apply\n")
+
+    # `--no-validate` only means anything on the default path: `--canonical` must
+    # parse to canonicalise, and `--check` deliberately never validates (it asks a
+    # byte-identity question). Accepting the flag and ignoring it is the defect this
+    # function had twice already.
+    if args.no_validate and (args.canonical or args.check):
+        other = "--canonical" if args.canonical else "--check"
+        err.write(f"--no-validate does not apply with {other}\n")
         return EXIT_ERROR
 
-    # Read the bytes ONCE, then validate *those bytes* and hash *those bytes*.
-    # Validating via one open and hashing via another is a real TOCTOU: swap the
-    # file between them and the minted chiro:// address names content that was
-    # never checked. Demonstrated with an os.replace during the parse of a large
-    # manifest. It also halves the work — `chiro ref` on an 18 MB manifest went
-    # from 0.5 s to 10 s when the validating parse was added on top of a second read.
-    raw = read_manifest_bytes(path)
+    # Compute the reference ONCE, before branching, so every path — plain,
+    # --canonical and --check — agrees on what is being referenced. An earlier
+    # version computed it inside the `--check` branch, which silently ignored
+    # `--canonical` and produced both false OK and false MISMATCH for exactly the
+    # combination where a reformat-invariant address matters.
+    if args.canonical:
+        reference = canonical_ref(load_manifest_named(path), args.algorithm)
+    elif args.check or args.no_validate:
+        # No parse needed, so stream the hash instead of holding the whole file:
+        # `chiro ref` is run over large manifests and `--no-validate` exists to be
+        # cheap.
+        reference = ChiroRef.for_path(path, args.algorithm)
+    else:
+        # Read the bytes once, then validate *those bytes* and hash *those bytes*.
+        # Validating via one open and hashing via another is a real TOCTOU: swap the
+        # file between them and the minted chiro:// address names content that was
+        # never checked. (This is purely about correctness — an earlier comment here
+        # claimed it "halves the work", which measurement disproved: the run is
+        # dominated by the parse, and dropping the second read saves ~0.02 s of ~10 s
+        # on a 17 MB manifest.)
+        #
+        # Confirm the bytes *are* a manifest before minting a reference to them: the
+        # reference asserts "this is manifest X", and producing one for a UTF-16 file
+        # or a truncated blob would let a registry store something that is not a
+        # manifest under a chiro:// address. `ChiroRef.for_bytes` stays a pure hash,
+        # the right library primitive.
+        raw = read_manifest_bytes(path)
+        loads_named(raw, path)
+        reference = ChiroRef.for_bytes(raw, args.algorithm)
 
     if args.check:
-        # `--check REF` asks a *byte-identity* question: "did I fetch the right
-        # manifest?" Validating here would report failure for a byte-perfect
-        # download of a manifest that has a finding, and would collapse "wrong
-        # download" and "invalid manifest" into one exit code. Deliberately not
-        # validated; use `chiro validate` for that, which is a separate question.
-        reference = ChiroRef.for_bytes(raw, args.algorithm)
         expected = ChiroRef.parse(args.check)
         if expected.algorithm != reference.algorithm:
             err.write(
@@ -1034,19 +1077,6 @@ def cmd_ref(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
                 + "\n"
             )
         return EXIT_OK if matched else EXIT_FINDING
-
-    if args.canonical:
-        reference = canonical_ref(Manifest.loads(raw), args.algorithm)
-    else:
-        # Confirm the bytes *are* a manifest before minting a reference to them. The
-        # reference asserts "this is manifest X"; producing one for a UTF-16 file or
-        # a truncated JSON blob would let a registry store something that is not a
-        # manifest under a chiro:// address — the failure mode spec §1.2 exists to
-        # prevent. `ChiroRef.for_bytes` stays a pure hash, the right library
-        # primitive.
-        if not args.no_validate:
-            Manifest.loads(raw)
-        reference = ChiroRef.for_bytes(raw, args.algorithm)
 
     if args.json:
         emit_json({"reference": str(reference), "shard_path": reference.shard_path}, out)

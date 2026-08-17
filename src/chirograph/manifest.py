@@ -63,6 +63,9 @@ __all__ = [
 #: consulted on every FileEntry construction.
 _DIGEST_LENGTHS = frozenset(HASH_ALGORITHMS.values())
 
+#: Sentinel distinguishing "attribute absent" from "attribute is None".
+_MISSING: Any = object()
+
 _KNOWN_ENTRY_FIELDS = frozenset(ENTRY_FIELD_ORDER)
 _KNOWN_HEADER_FIELDS = frozenset([*HEADER_FIELD_ORDER, "files"])
 
@@ -660,15 +663,28 @@ class Manifest:
         if isinstance(text, (bytes, bytearray)):
             text = decode_document(bytes(text))
         # `ValueError` rather than `json.JSONDecodeError`, plus `RecursionError`:
-        # json.loads raises a plain ValueError for an integer past the 4300-digit
-        # conversion limit and RecursionError for a deeply-nested array. Both are
-        # properties of the document, so both are SchemaErrors — and translating
-        # them here means every command gets it, rather than each one growing its
-        # own handler and `chiro ref` printing a raw traceback.
+        # beyond malformed syntax, json.loads raises a plain ValueError for an
+        # integer past CPython's 4300-digit conversion limit, and RecursionError for
+        # deeply-nested arrays. Translating all three here means every command gets
+        # it, rather than each growing its own handler and `chiro ref` printing a raw
+        # traceback.
+        #
+        # Note the last two are limits of *this parser*, not defects in the document:
+        # a 5000-digit integer is perfectly valid JSON. The message says "could not
+        # be parsed" rather than "is not valid JSON" so it does not misattribute the
+        # cause. It is still a finding rather than a tool failure, because no field in
+        # this format accepts such a value, so the document is not a usable manifest
+        # either way.
         try:
             data = json.loads(text)
-        except (ValueError, RecursionError) as exc:
+        except json.JSONDecodeError as exc:
             raise SchemaError(f"manifest is not valid JSON: {exc}") from exc
+        except (ValueError, RecursionError) as exc:
+            raise SchemaError(
+                f"manifest could not be parsed: {exc}. This is a limit of the JSON parser "
+                f"rather than a syntax error, but no field in this format accepts such a "
+                f"value, so the document is not a usable manifest."
+            ) from exc
         return cls.from_dict(data, **kwargs)
 
     @classmethod
@@ -809,13 +825,24 @@ def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     normalised: list[FileEntry] = []
     for index, entry in enumerate(files):
         for name in ("relpath", "source_path"):
-            value = getattr(entry, name, None)
+            # A sentinel, not None: `getattr(entry, name, None)` reports a *missing*
+            # attribute as "got NoneType", which misdiagnoses the commonest duck-type
+            # mistake — and `source_path` legitimately *is* None, so the two cases
+            # have to be distinguishable.
+            value = getattr(entry, name, _MISSING)
+            if value is _MISSING:
+                raise SchemaError(f"files[{index}] has no {name!r} attribute")
             if name == "source_path" and value is None:
                 continue
             if not isinstance(value, str):
                 raise SchemaError(
                     f"files[{index}]: {name!r} must be a string, got {type(value).__name__}"
                 )
+        if not hasattr(entry, "to_dict"):
+            raise SchemaError(
+                f"files[{index}] is not a FileEntry: no 'to_dict' method "
+                f"(got {type(entry).__name__})"
+            )
         relpath = nfc(entry.relpath)
         source_path = None if entry.source_path is None else nfc(entry.source_path)
         if relpath != entry.relpath or source_path != entry.source_path:

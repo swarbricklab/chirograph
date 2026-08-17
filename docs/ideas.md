@@ -73,6 +73,23 @@ nothing else). That is a small formatter over the existing diff, and having the
 report *format* defined before the registry exists means consumers can start
 collecting drift observations locally today, into a file, for later submission.
 
+**Design this format's path encoding deliberately.** It is the first thing here that
+will cross a language boundary, and [D-21](decisions.md#d-21) leaves a known gap for
+it: a path whose bytes are not valid UTF-8 currently appears in `--json` as a
+`\uDCxx` escape, which is valid JSON syntax and lossless in Python but which
+RFC 8259 §8.2 marks non-interoperable — Go substitutes U+FFFD and `serde_json`
+errors. Squeezing raw bytes into a JSON *string* has no good answer; the report
+should instead carry a dedicated, explicitly-encoded field, e.g.
+
+```json
+{ "relpath": "sample/caf\ufffd.txt", "relpath_bytes_b64": "c2FtcGxlL2NhZv8udHh0" }
+```
+
+— a display form that is always valid UTF-8, plus the exact bytes in an encoding
+every language can decode. Attempting this inside `emit_json` was tried and reverted
+(D-21) because a lossy transform there destroyed the consumer's ability to locate the
+file at all; the fix belongs in a format designed for it.
+
 ### 2.2 Resume / incremental re-hashing ★
 For a multi-TB deposit, `chiro write` is a long single-shot operation and an
 interruption loses everything. Two cheap wins:

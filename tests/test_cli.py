@@ -920,7 +920,7 @@ def test_canonical_and_no_validate_are_mutually_exclusive(built: Path, capsys) -
     """--canonical must parse to canonicalise, so the flag cannot be honoured."""
     code, _, err = run(capsys, "ref", str(built), "--canonical", "--no-validate")
     assert code == EXIT_ERROR
-    assert "--no-validate cannot apply" in err
+    assert "--no-validate does not apply" in err
 
 
 def test_json_output_keeps_a_non_utf8_filename_recoverable(tmp_path: Path, capsys) -> None:
@@ -949,3 +949,77 @@ def test_json_output_keeps_a_non_utf8_filename_recoverable(tmp_path: Path, capsy
     assert len(names) == 1
     # The decisive property: the reported name locates the actual file.
     assert (root / names[0]).exists(), names
+
+
+# --------------------------------------------------------------------------- #
+# Regressions from the fifth review pass
+# --------------------------------------------------------------------------- #
+
+
+def test_canonical_check_compares_the_canonical_address(
+    built: Path, tmp_path: Path, capsys
+) -> None:
+    """`--check` used to be evaluated before `--canonical`, so it silently ignored it.
+
+    That produced both a false MISMATCH (for the canonical address the user asked
+    about) and a false OK (for the whole-file address they did not) — and made
+    `--canonical`'s only real use, a reformat-invariant comparison, unavailable.
+    """
+    _, plain, _ = run(capsys, "ref", str(built))
+    _, canonical, _ = run(capsys, "ref", str(built), "--canonical")
+    assert plain.strip() != canonical.strip()
+
+    assert run(capsys, "ref", str(built), "--canonical", "--check", canonical.strip())[0] == EXIT_OK
+    assert (
+        run(capsys, "ref", str(built), "--canonical", "--check", plain.strip())[0] == EXIT_FINDING
+    )
+
+    # The point of --canonical: re-indenting must not change the answer.
+    reindented = tmp_path / "reindented.chiro.json"
+    reindented.write_text(json.dumps(json.loads(built.read_text()), indent=8) + "\n")
+    assert run(capsys, "ref", str(built), "--check", plain.strip())[0] == EXIT_OK
+    assert run(capsys, "ref", str(reindented), "--check", plain.strip())[0] == EXIT_FINDING
+    assert (
+        run(capsys, "ref", str(reindented), "--canonical", "--check", canonical.strip())[0]
+        == EXIT_OK
+    )
+
+
+def test_info_on_a_stream_reports_the_right_reference(built: Path, capsys) -> None:
+    """`cmd_info` read the file twice; on a pipe the first read drained it.
+
+    The second read then returned nothing, so `reference` was md5 of the empty
+    string — a wrong chiro:// address inside an otherwise-correct report, at exit 0.
+    """
+    import subprocess
+    import sys
+
+    expected = run(capsys, "ref", str(built))[1].strip()
+    result = subprocess.run(
+        [sys.executable, "-m", "chirograph.cli", "info", "/dev/stdin", "--json"],
+        input=built.read_bytes(),
+        capture_output=True,
+    )
+    assert result.returncode == EXIT_OK, result.stderr.decode()
+    assert json.loads(result.stdout)["reference"] == expected
+
+
+def test_no_validate_is_refused_where_it_cannot_apply(built: Path, capsys) -> None:
+    """`--canonical` must parse, and `--check` deliberately never validates.
+
+    Accepting the flag and ignoring it is the defect this function had twice.
+    """
+    for extra in (["--canonical"], ["--check", "chiro://md5:" + "0" * 32]):
+        code, _, err = run(capsys, "ref", str(built), *extra, "--no-validate")
+        assert code == EXIT_ERROR
+        assert "--no-validate does not apply" in err
+
+
+def test_ref_errors_name_the_file(built: Path, tmp_path: Path, capsys) -> None:
+    """Parsing bytes we already hold lost the filename that `Manifest.load` adds."""
+    broken = tmp_path / "trunc.chiro.json"
+    broken.write_text('{"schema": "chirograph",')
+    for command in ("ref", "info", "ls"):
+        code, _, err = run(capsys, command, str(broken))
+        assert code == EXIT_FINDING
+        assert "trunc.chiro.json" in err, command

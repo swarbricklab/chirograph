@@ -838,6 +838,46 @@ to 10 s because validating means parsing. That is the price of not minting addre
 for non-manifests; `--no-validate` restores the fast path when the caller already
 knows.
 
+### Found by the fifth pass
+
+Ten findings, **three of them regressions from round 4** — two serious, and both in
+the same function I had just rewritten:
+
+- **`ref --canonical --check` silently ignored `--canonical`.** Moving the `--check`
+  branch above the `--canonical` one meant `--check` always compared the *whole-file*
+  address, producing a false MISMATCH for the canonical address the user asked about
+  and a false OK for the one they did not — and making `--canonical`'s only real use,
+  a reformat-invariant comparison, unavailable. This is the "accepted and silently
+  ignored" defect I had made a hard error for `--canonical --no-validate` **two lines
+  away in the same hunk**. The reference is now computed once, before any branching.
+- **`chiro info` on a streamed manifest minted `md5("")` as the address.** `cmd_info`
+  still read the file twice, which was harmless only while special files were
+  refused; once [D-20](#d-20) allowed pipes again, the first read drained the pipe and
+  the second returned nothing. A wrong `chiro://` address inside an otherwise-correct
+  report, at exit 0 — precisely the failure mode the previous commit claimed to have
+  closed. My own new test blessed it, because it asserted only the exit code.
+- **`verify` blocked or spun forever on a special payload file.** I had coupled the
+  `hash_file` revert to the `read_manifest_bytes` revert without needing to. A
+  payload path comes from the *manifest*, not from something the caller typed, so
+  D-20's reasoning does not apply — and a FIFO or `/dev/zero` both report size 0, so a
+  manifest declaring size 0 walked past the size check into an unbounded read. The
+  guard now lives in `verify_entry`, leaving `hash_file` a general primitive.
+
+Plus: `ref` had lost the filename from its error messages (it parses bytes it already
+holds, so it could not use `Manifest.load`'s prefixing); `--no-validate` had stopped
+streaming, taking peak memory from 28 MB to 188 MB on a 172 MB file; the duck-type
+check used `getattr(…, None)`, which reports a *missing* attribute as "got NoneType";
+`--check --no-validate` was accepted and ignored; and two of my own claims were
+wrong again — a `cmd_ref` comment said the single read "halves the work" when
+measurement shows it saves 0.02 s of a 10 s run, and D-21's pointer to
+[`ideas.md`](ideas.md) §2.1 was dangling because I never wrote the content it
+deferred there. All fixed; §2.1 now carries the actual proposal.
+
+This pass also confirmed D-21's two claims are correct as written, that `emit_json`
+is byte-identical across all ten `--json`-producing commands, that the surrogate case
+is genuinely lossless (a consumer can locate both files), and that the README's
+streaming block works exactly as printed.
+
 The first review also cleared several areas, which is worth recording: no accepted path escapes the import target (fullwidth and division
 solidus, `....//`, percent-encoded traversal, overlong components and bidi
 overrides were all tried, and no codepoint's NFC or NFD form contains `/`, `\`,

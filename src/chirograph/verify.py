@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import random
+import stat
 import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -299,6 +300,21 @@ def verify_entry(
     except OSError as exc:
         return FileResult(
             entry.relpath, STATUS_UNREADABLE, entry.md5, entry.size, detail=exc.strerror
+        )
+
+    # A payload path comes from the *manifest*, not from something the user typed,
+    # so a special file there is never intended — and reading one is not merely
+    # wrong but unbounded: a FIFO blocks until a writer appears and /dev/zero never
+    # ends. Both report st_size 0, so a manifest declaring size 0 would sail past
+    # the size check straight into an endless read. (Contrast D-20, which
+    # deliberately allows special files where the *user* named the path.)
+    if not stat.S_ISREG(info.st_mode):
+        return FileResult(
+            entry.relpath,
+            STATUS_UNREADABLE,
+            entry.md5,
+            entry.size,
+            detail=f"not a regular file ({stat.filemode(info.st_mode)})",
         )
 
     if info.st_size != entry.size:

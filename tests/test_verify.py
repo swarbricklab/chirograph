@@ -237,3 +237,37 @@ def test_nfd_fallback_works_when_the_root_itself_has_an_accent(tmp_path: Path) -
         manifest = Manifest(files=[FileEntry(nfc_name, MD5_HELLO, 6)])
         report = verify_tree(manifest, root)
         assert report.ok, (root_name, [r.to_dict() for r in report.failures])
+
+
+def test_special_payload_file_is_unreadable_not_a_hang(tmp_path: Path) -> None:
+    """A payload path comes from the *manifest*, not from something a user typed.
+
+    Reading one is unbounded, not merely wrong: a FIFO blocks until a writer appears
+    and /dev/zero never ends. Both report st_size 0, so a manifest declaring size 0
+    walked straight past the size check into an endless read. Contrast D-20, which
+    deliberately allows special files where the *caller* named the path.
+
+    No timeout here on purpose: if this regresses, the suite hangs, and that is the
+    signal.
+    """
+    import os
+
+    root = tmp_path / "root"
+    root.mkdir()
+    manifest = Manifest(files=[FileEntry("a.txt", "d41d8cd98f00b204e9800998ecf8427e", 0)])
+
+    try:
+        os.mkfifo(root / "a.txt")
+    except (AttributeError, OSError):  # pragma: no cover
+        pytest.skip("cannot create a FIFO here")
+    report = verify_tree(manifest, root)
+    assert not report.ok
+    assert report.failures[0].status == "unreadable"
+    assert "not a regular file" in (report.failures[0].detail or "")
+
+    (root / "a.txt").unlink()
+    if os.path.exists("/dev/zero"):
+        (root / "a.txt").symlink_to("/dev/zero")
+        report = verify_tree(manifest, root)
+        assert not report.ok
+        assert report.failures[0].status == "unreadable"

@@ -129,9 +129,11 @@ def hash_file(path: str | os.PathLike[str], algorithm: str = "md5") -> str:
     larger than memory (a Visium matrix, a BAM).
     """
     hasher = new_hasher(algorithm)
-    # A directory is refused with a clear message; other special files are not,
-    # for the reasons in `manifest.read_manifest_bytes`. Streaming a pipe into a
-    # digest is legitimate.
+    # A directory is refused with a clear message. Other special files are not:
+    # this is the general hashing primitive, and streaming a pipe into a digest is
+    # legitimate (`chiro ref` on a piped manifest, for one). Refusing a *payload*
+    # that is a special file is `verify_entry`'s job, because there the path comes
+    # from the manifest rather than from something the caller typed.
     target = os.fspath(path)
     if os.path.isdir(target):
         raise IsADirectoryError(f"{target} is a directory, not a file to hash")
