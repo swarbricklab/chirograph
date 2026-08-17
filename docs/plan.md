@@ -82,7 +82,9 @@ of a drift report), `chiro ref` (`chiro://` syntax + registry shard path),
 
 ### Verification status
 
-420 tests, 90% statement coverage; `ruff` and `mypy --strict` clean. Notably:
+485 tests, 92% statement coverage; `ruff` and `mypy --strict` clean; conformance
+vectors 68/68 and independently re-derived with coreutils. Also checked from a
+clean zero-dependency wheel install and on the Python 3.10 floor. Notably:
 
 - **DVC interop is tested against the real `dvc` CLI**, not a hand-built fake
   cache — the whole point is to check our *understanding* of DVC's format against
@@ -90,6 +92,19 @@ of a drift report), `chiro ref` (`chiro://` syntax + registry shard path),
   including for non-ASCII trees (where the `ensure_ascii` difference bites).
 - The end-to-end deposit workflow (reorganise → publish → verify → detect drift →
   diff) runs as a single test.
+
+**Five adversarial review passes** were run over the implementation, each required to
+reproduce every finding before reporting it. They found **31 defects**, all fixed
+with regression tests — including a TOCTOU in `chiro ref`, `fetch_plan()` returning
+non-URLs for `geo://` and `s3://` (the spec's own examples), `chiro remap` silently
+destroying paths, and a `chiro validate` that accepted a UTF-16 manifest. Rounds 1–3
+each introduced regressions that the next round caught; round 4 was largely reverting
+over-corrections, and round 5 checked those reverts. The findings, including the
+several places where a review disproved a claim in my own commit messages, are in
+[`decisions.md`](decisions.md).
+
+That history is the honest summary of how much of this was got right first time:
+the tests passing was never the same thing as the code being correct.
 
 ## Milestone 2 — registry framework (DEFERRED)
 
