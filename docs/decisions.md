@@ -77,9 +77,13 @@ logic" now needs one command (`chiro dvc-dir --hash-only`) rather than being tru
 by inspection. The interop is verified byte-for-byte against real DVC output, so
 nothing is lost but the one-step-ness.
 
-**Spec text to change** (not yet edited — see [Follow-ups](#follow-ups)): §0
-bullet 1, §0 "Consequence", §3.1 `body_hash` row, §4 Layer-2 bullets 2–3, §8.2
-closing sentence.
+**Spec corrected in place** (v0.3), marked *(corrected v0.3)* at each site: the
+errata note at the top, §0 bullets 1–2, §0 "Consequence", the intro paragraph,
+§3.1 `body_hash` row, §4 (Layer-2 canonicalisation, plus a new "DVC `.dir` interop"
+subsection), and §8.2's closing sentence. **Please review the wording** — the
+finding is not in doubt, but the phrasing is mine and the spec is your document.
+Correcting in place rather than only logging it here, because a known-false claim
+left standing in a spec is what a second implementer would build against.
 
 ---
 
@@ -485,18 +489,55 @@ perform; it is the only way to get an object at all.
 
 ## Follow-ups
 
-Things this implementation is waiting on, or has left for a human:
+What needs your eye, in priority order:
 
-1. **Edit the spec** for D-01 and D-02. The implementation, tests, vectors and
-   this log are all consistent and correct; `chiro-format-spec.md` §0, §3.1, §4
-   and §8.2 still contain the disproved claims. Left unedited because the spec is
-   the authored artifact and its wording is yours — the precise passages are
-   listed at the end of D-01.
-2. **Decide on D-09 for Milestone 2** — whether registry addressing uses the
-   whole-file hash or the canonical-document hash. Both are implemented; only the
-   registry can choose.
-3. **`plan.md` Milestone 0's remaining items** are now closed (vectors frozen,
-   D-03, D-04, JSON Schema published). The auto-discovery filename convention
-   (spec §6) is *partially* addressed: `Manifest.default_filename()` implements
-   the accession-derived convention, but which filenames GEO/BIA/Zenodo actually
-   permit is an empirical question needing those repositories.
+1. **Review the spec corrections for D-01 and D-02** (spec v0.3). The finding is
+   verified against a real DVC install and is not in doubt; the *wording* is mine
+   and the spec is your document. Every change is marked *(corrected v0.3)* and
+   there is an errata note at the top of the file. This is the single most
+   consequential thing in the whole night's work: it changes what the format
+   claims about DVC.
+2. **Confirm D-03 and D-04**, the two policy questions the plan explicitly assigned
+   ("decide hash-algorithm policy", "decide ETag handling"). Both are now closed in
+   the spec and enforced in code, so reversing them is a spec change, not just a
+   flag flip. D-04 in particular *removes* a capability the spec previously listed
+   as permitted.
+3. **Decide D-09 for Milestone 2** — whether registry addressing uses the
+   whole-file hash (as registry design §2 specifies) or the reformat-invariant
+   canonical-document hash. Both are implemented; only the registry can choose,
+   and choosing late is cheap. Nothing is blocked on it today.
+4. **The vectors are now a freeze.** `tools/gen_vectors.py` refuses to overwrite
+   them without `--force` for that reason. If any expected value in
+   `src/chirograph/vectors/canonicalisation.json` is wrong, it needs a corrected
+   set under a new `spec_version` rather than an in-place edit — but nothing should
+   be published anywhere until you are happy with them, because publishing is what
+   makes the freeze a commitment (see `ideas.md` §4.5).
+
+Smaller loose ends:
+
+5. The auto-discovery filename convention (spec §6) is *partially* addressed:
+   `Manifest.default_filename()` implements the accession-derived convention, but
+   which filenames GEO/BIA/Zenodo actually permit is an empirical question that
+   needs those repositories.
+6. Nothing has been pushed. The work is on the branch
+   `implement-milestone-0-and-1`; `main` is untouched.
+
+### Found by verification rather than by design
+
+Recorded because they are the kind of thing that only shows up when you run the
+thing rather than read it:
+
+- **A test caught a real NFC bug.** The walk NFC-normalises paths for the manifest,
+  and the writer was then using those normalised paths to `stat` and hash — which
+  fails on a tree written on macOS, where the on-disk names are NFD. `WalkReport`
+  now carries `paths` (manifest) and `disk_paths` (on-disk) as parallel lists, and
+  `verify` falls back to the NFD spelling when the NFC one is absent. See
+  [D-10](#d-10) and [D-11](#d-11).
+- **Installing the built wheel into an empty virtualenv caught an exit-code bug.**
+  `chiro validate --jsonschema` without the `schema` extra reported the manifest as
+  INVALID and exited 1 — i.e. a CI gate would have blocked a merge because of the
+  *runner's* install. Now exits 2, per [D-16](#d-16). Guarded by a `no-dependencies`
+  CI job that installs the wheel bare and asserts nothing else arrives.
+- **The drift explanation was too narrow.** It only fired on hash mismatches, so
+  the two commonest shapes of real upstream drift — a file whose size also changed,
+  and a withdrawn file — went unexplained. Now covers all three.
