@@ -352,8 +352,17 @@ picture.
 
 - **Directory symlinks: not followed** by default. A link to an ancestor makes the
   walk infinite; a link out of the tree silently publishes bytes the user did not
-  mean to include. `--follow-symlinks` opts in, with an inode-based cycle guard
-  (which `os.walk(followlinks=True)` does not provide).
+  mean to include. `--follow-symlinks` opts in, with a `(device, inode)` identity
+  guard, which `os.walk(followlinks=True)` does not provide at all — without it a
+  link to an ancestor recurses until the path-length limit, i.e. it hangs rather
+  than erroring.
+
+  The guard deduplicates by identity rather than only breaking true cycles, so a
+  link to a *sibling* subtree is skipped too. That is deliberate: two `relpath`s
+  for one file leave a consumer no way to decide which to materialise. Real
+  directories are visited before symlinked ones at each level so that the surviving
+  name is the real path rather than whichever alias sorted earlier — found by a
+  test that initially asserted the opposite of what the code did.
 - **File symlinks: included**, hashed by their target's content. That is what DVC
   does and what a user means by "this file".
 - **Broken symlinks, FIFOs, sockets, devices: skipped with a stated reason.**

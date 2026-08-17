@@ -75,6 +75,34 @@ def test_walk_does_not_follow_directory_symlinks(tree: Path) -> None:
     assert any("symlink to a directory" in reason for _, reason in report.skipped)
 
 
+def test_follow_symlinks_survives_a_cycle(tmp_path: Path) -> None:
+    """`os.walk(followlinks=True)` has no cycle protection; this must supply it.
+
+    Without the (device, inode) guard, a link pointing at an ancestor recurses
+    until the path-length limit — a hang, not an error.
+    """
+    root = tmp_path / "cyc"
+    (root / "a" / "b").mkdir(parents=True)
+    (root / "a" / "b" / "file.txt").write_bytes(b"hello\n")
+    (root / "a" / "b" / "loop").symlink_to(root / "a", target_is_directory=True)
+
+    report = walk_tree(root, follow_symlinks=True)
+    assert report.paths == ["a/b/file.txt"]
+    assert any("already included" in reason for _, reason in report.skipped)
+
+
+def test_follow_symlinks_does_not_double_count_a_sibling_link(tmp_path: Path) -> None:
+    """Two relpaths for one file would leave a consumer no way to choose."""
+    root = tmp_path / "dup"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "file.txt").write_bytes(b"hello\n")
+    (root / "alias").symlink_to(root / "real", target_is_directory=True)
+
+    report = walk_tree(root, follow_symlinks=True)
+    assert report.paths == ["real/file.txt"]
+    assert "alias/file.txt" not in report.paths
+
+
 def test_walk_includes_file_symlinks_by_target_content(tree: Path) -> None:
     (tree / "alias.tsv").symlink_to(tree / "sampleA" / "barcodes.tsv")
     result = build_from_directory(tree)

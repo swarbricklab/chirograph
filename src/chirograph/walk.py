@@ -158,17 +158,36 @@ def walk_tree(
                 report.skipped.append((child_rel + "/", "symlink to a directory (not followed)"))
                 continue
             kept_dirs.append(name)
+        # Descend into real directories before symlinked ones. This only matters
+        # when following symlinks and two names reach the same directory: the
+        # identity guard below keeps whichever is visited first, and a manifest
+        # should describe the tree by its real names rather than by whichever alias
+        # happened to sort earlier. Traversal order only; output is sorted at the
+        # end, so this does not affect the manifest's determinism.
+        kept_dirs.sort(key=lambda name: ((current / name).is_symlink(), name))
         dirnames[:] = kept_dirs
 
         if follow_symlinks:
-            # Guard against link cycles, which followlinks=True does not.
+            # `os.walk(followlinks=True)` has no cycle protection at all, so a link
+            # pointing at an ancestor recurses until the path length limit. Track
+            # visited (device, inode) pairs and stop at any repeat.
+            #
+            # This deduplicates by identity rather than only breaking true cycles,
+            # so a link to a *sibling* subtree is also skipped: its files are
+            # already in the manifest under their real names, and adding them a
+            # second time would give two relpaths for one file with no way to tell
+            # which one a consumer should materialise. The reason string says
+            # "already included" rather than "cycle" because both cases land here
+            # and only one of them is a cycle.
             try:
                 info = current.stat()
             except OSError:  # pragma: no cover - raced away
                 continue
             key = (info.st_dev, info.st_ino)
             if key in seen_dirs:
-                report.skipped.append((rel_dir or ".", "already visited (symlink cycle)"))
+                report.skipped.append(
+                    (rel_dir or ".", "already included under another path (symlink)")
+                )
                 dirnames[:] = []
                 continue
             seen_dirs.add(key)
