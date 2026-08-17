@@ -1,0 +1,28 @@
+# Chirograph development environment.
+# Create/update with:
+#   conda env create -f environment.yaml     # first time
+#   conda env update -f environment.yaml     # subsequent changes
+#
+# The `chirograph` runtime itself has NO required third-party dependencies
+# (stdlib only) — see docs/decisions.md D-08. Everything below is either an
+# optional extra or a development tool.
+name: chirograph
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pip
+  # optional extras exercised by the test suite
+  - pyyaml            # chirograph[dvc]    — parsing .dvc / dvc.lock
+  - jsonschema        # chirograph[schema] — JSON Schema validation
+  # development tooling
+  - pytest
+  - pytest-cov
+  - ruff
+  - mypy
+  # for the DVC interop conformance tests (test_dvc_interop.py); these are
+  # skipped automatically if `dvc` is not importable
+  - dvc
+  - pip:
+      - -e .

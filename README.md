@@ -23,23 +23,128 @@ repository the data must live in:
 - **Provenance** distinguishing "this is what I published" (`self-deposited`) from
   "this is what I downloaded on date D" (`observed-download`).
 
+## Install
+
+```bash
+pip install chirograph                 # no runtime dependencies at all
+pip install 'chirograph[dvc]'          # + reading .dvc / dvc.lock files
+pip install 'chirograph[schema]'       # + JSON Schema validation
+```
+
+The core has **zero required dependencies**: it is the reference implementation of a
+file format, and a consumer of a checksum-verification library has the best possible
+reason to want its supply chain to be nothing.
+
+For development, `environment.yaml` builds a conda environment with the extras and
+tooling:
+
+```bash
+conda env create -f environment.yaml && conda activate chirograph
+pytest && ruff check . && mypy
+```
+
+## Use
+
+Describe a directory you are about to deposit:
+
+```bash
+chiro write ./deposit --accession GSE000000 -o GSE000000.chiro.json
+```
+
+Capture a dataset you downloaded, reorganising a flat deposit into a tidy workspace
+tree as you go (one rule does the whole spec §8.1 example):
+
+```bash
+chiro capture ./deposit \
+    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE000nnn/GSE000000/suppl/' \
+    --accession GSE000000 \
+    --relpath-from-source '^GSE000000_([^_]+)_(.*)$=>\1/\2' \
+    -o GSE000000.chiro.json
+```
+
+Transcribe what DVC has already hashed, without re-reading a byte:
+
+```bash
+chiro write --from-dvc-cache data.dvc -o data.chiro.json
+```
+
+Check bytes against a manifest, or just the manifest's own integrity:
+
+```bash
+chiro verify GSE000000.chiro.json --root ./deposit --source-layout
+chiro validate GSE000000.chiro.json          # reads no data — a registry's Tier-1 gate
+chiro verify  GSE000000.chiro.json --sample 100   # bounded-cost spot check
+```
+
+Detect that an upstream record has changed under a stable accession:
+
+```bash
+chiro capture ./deposit --source-url ... -o later.chiro.json
+chiro diff GSE000000.chiro.json later.chiro.json
+```
+
+`chiro --help` lists the rest: `info`, `ls`, `ref`, `remap`, `dvc-dir`, `schema`,
+`test-vectors`.
+
+**Exit codes** are part of the contract, so this can run as a CI gate: `0` success,
+`1` a *finding* (bytes or manifest disagree), `2` the tool could not run.
+
+### As a library
+
+```python
+import chirograph
+
+manifest = chirograph.load("GSE000000.chiro.json")  # validates schema + Layer 2
+for item in manifest.fetch_plan():  # spec §9 fetch resolution
+    ...  # fetch item.url, place at item.relpath, check against item.md5
+
+# Check bytes. `use_source_layout=True` looks for files where they sit in the
+# deposit; the default looks for them in the workspace layout.
+report = chirograph.verify_tree(manifest, "deposit/", use_source_layout=True)
+assert report.ok, report.explain()
+```
+
+`fetch_plan()` is the intended integration point for a data-access layer such as
+`archivefs`, so it does not have to re-derive the two-path model (or rediscover the
+`urljoin` trailing-slash trap).
+
 ## The `.chiro.json` format
 
 A Chirograph manifest is a JSON file that mirrors DVC's `.dir` format (`relpath` /
-`md5` / `size` entries) with a header block adding provenance, a two-path model
+`md5` entries, plus `size`) with a header block adding provenance, a two-path model
 (where a file lives in the repository vs. where it materialises in your workspace),
 and a body-integrity hash for standalone use. See
 [`docs/chiro-format-spec.md`](docs/chiro-format-spec.md).
 
+Canonicalisation is the fragility point — a reimplementation that canonicalises
+*almost* identically produces non-matching hashes silently — so it is **frozen and
+pinned by published conformance vectors** that ship inside the package:
+
+```bash
+chiro test-vectors --check     # check an implementation against the freeze
+chiro test-vectors             # the vectors themselves, for a reimplementation
+```
+
+Each vector carries the exact canonical *string*, not just its hash, so a mismatch
+can be diffed rather than guessed at.
+
 ## Status
 
-Design stage. This repo holds the format spec, the design of the manifest registry
-layer, and the implementation plan. The reference library/CLI (generate, verify,
-reconcile) is not yet built.
+**Format frozen; reference library and CLI implemented.** The registry layer is
+deliberately deferred — an in-repo manifest already does most of the job, and the
+registry is an optimisation over that baseline rather than a prerequisite.
 
 - **Format spec:** [`docs/chiro-format-spec.md`](docs/chiro-format-spec.md)
 - **Manifest registry design:** [`docs/manifest-registry-design.md`](docs/manifest-registry-design.md)
-- **Implementation plan / checklist:** [`docs/plan.md`](docs/plan.md)
+- **Implementation plan / status:** [`docs/plan.md`](docs/plan.md)
+- **Decisions taken while implementing:** [`docs/decisions.md`](docs/decisions.md)
+- **Ideas & extensions (not built):** [`docs/ideas.md`](docs/ideas.md)
+
+> Two claims in the spec about DVC `.dir` equivalence were disproved by checking them
+> against a real DVC installation, and are corrected in spec v0.3. `body_hash` is
+> **not** a DVC `.dir` hash; the equivalence is a separately derived value
+> (`chiro dvc-dir`), tested byte-for-byte against real `dvc add` output. See
+> [decisions D-01 and D-02](docs/decisions.md).
 
 ## Related projects
 

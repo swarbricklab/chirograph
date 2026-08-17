@@ -1,6 +1,19 @@
 # `.chiro.json` Format Specification (Chirograph)
 
-**Status:** draft v0.2 · **Format schema version:** `1.0`
+**Status:** draft v0.3 · **Format schema version:** `1.0`
+
+> **Errata in v0.3.** Two claims in v0.2 about DVC equivalence were checked
+> against a real DVC installation (dvc 3.66.1 / dvc-data 3.18.2) during
+> implementation and found to be **false**. They are corrected in place below, and
+> marked *(corrected v0.3)*. The reasoning, the evidence, and what was done
+> instead are in [`decisions.md`](decisions.md) **D-01** and **D-02**. In summary:
+> a DVC `.dir` carries **no `size` field**, and DVC serialises it with Python's
+> **default** `json.dumps` separators and `ensure_ascii=True` — so `body_hash` is
+> **not** a DVC `.dir` hash. The canonical form specified in §4 is unchanged;
+> DVC equivalence is now a separately *derived* value (§4, §11).
+>
+> §4's canonicalisation is now **frozen** and pinned by published test vectors —
+> see §11.
 
 > **Naming.** Project **Chirograph** — after the medieval document written in
 > duplicate with a word inscribed across the join, then *cut through that word* so
@@ -18,7 +31,7 @@ A manifest format for scientific-data depositions: a machine-readable list of th
 files in a deposition, each with a checksum, size, and path, plus header metadata.
 
 It is designed to **mirror DVC's `.dir` format as closely as possible** — the body
-is a strict superset of a DVC `.dir` (`{relpath, md5, size}` entries), so a
+is a strict superset of a DVC `.dir` (`{relpath, md5}` entries, plus `size`), so a
 DVC-literate tool or person reads it with zero translation, and generating a
 manifest from a DVC cache is near-literal transcription. It adds a header block,
 provenance semantics, a two-path model, and a body-integrity hash for standalone
@@ -35,8 +48,15 @@ then only has to (a) locate bytes in the repo and (b) place them in the workspac
 
 Verified against DVC's docs and serialization source:
 
-- DVC `.dir` entries are `{"relpath": ..., "md5": ..., "size": ...}`, a JSON array
-  **sorted by `relpath`**, paths joined with POSIX separators.
+- *(corrected v0.3)* DVC `.dir` entries are **`{"md5": ..., "relpath": ...}`** — a
+  JSON array **sorted by `relpath`**, paths joined with POSIX separators. There is
+  **no `size`**: size lives in DVC's `Meta`, which is only serialised in the
+  `with_meta=True` variant of `Tree.as_bytes()`, and that variant is not what DVC
+  hashes or writes to the cache. (v0.2 claimed `size` was present.)
+- *(corrected v0.3)* DVC serialises with `json.dumps(lst, sort_keys=True)` — i.e.
+  Python's **default** separators (`", "` and `": "`, *with spaces*) and **default**
+  `ensure_ascii=True` (non-ASCII escaped to `\uXXXX`). This is **not** the compact
+  form §4 specifies for `body_hash`.
 - The **directory hash is the md5 of the `.dir` JSON content** — DVC's own answer to
   "is the manifest corrupt." Our Layer-3 (whole-file hash in the `.dvc`) is exactly
   this mechanism.
@@ -48,9 +68,17 @@ Verified against DVC's docs and serialization source:
   versioning).
 
 **Consequence:** we use **md5**, field names **`relpath` / `md5` / `size`**, DVC's
-sort-and-serialise method, and DVC's top-level `size` / `nfiles`. Where our body
-carries no extension fields, it *is* a valid DVC `.dir` and our `body_hash` equals
-DVC's `.dir` hash.
+sort order, and DVC's top-level `size` / `nfiles`.
+
+*(corrected v0.3)* Where our body carries no extension fields it **is valid input
+to DVC's `Tree.from_list`** — DVC accepts the extra `size` key, routing it into
+`Meta` — so a DVC-literate tool or person still reads our body with zero
+translation, which was the point. But because of the two corrections above, our
+`body_hash` **does not equal** DVC's `.dir` hash: DVC drops `size` and uses
+different serialisation. The equivalence is instead available as a *derived* value,
+computed on demand (§4 "DVC `.dir` interop", `chiro dvc-dir`), which is verified
+byte-for-byte against real DVC output. See [`decisions.md`](decisions.md) D-01 for
+why the canonical form was **not** changed to chase DVC's.
 
 ---
 
@@ -75,6 +103,10 @@ A single JSON object (UTF-8, no BOM). v1.0 is plain JSON. A streamable JSON-Line
 variant is **deferred** (see §10) — it would break the DVC-`.dir` equivalence and
 complicate the body hash, so it is not worth adopting until a real deposit's file
 count makes JSON parse-time hurt (realistically >~10^5 files).
+
+A leading UTF-8 BOM is a hard error, not something to strip: it would change the
+whole-file hash and therefore the `chiro://` reference (§4 Layer 3) while leaving
+the manifest looking identical.
 
 ---
 
@@ -120,7 +152,7 @@ that matter.
 |---|---|---|---|
 | `schema` | **yes** | string | Constant `"chirograph"`. Fallback identifier if the filename is mangled; validators key on it. |
 | `schema_version` | **yes** | string | Format version (`"1.0"`). Lets future parsers handle old files. |
-| `hash_algorithm` | **yes** | string | Algorithm for `body_hash` and every `files[].md5`. `"md5"` (default, DVC-aligned). MAY be `"sha256"` or `"etag"` (see §6.1, §10). A consumer MUST read this to verify anything. |
+| `hash_algorithm` | **yes** | string | Algorithm for `body_hash` and every `files[].md5`. `"md5"` (default, DVC-aligned) or `"sha256"`. A consumer MUST read this to verify anything. *(frozen v0.3)* `"etag"` is **reserved but not valid** at `schema_version` 1.0 — an ETag is not a function of content alone, so it can neither address content nor be checked against bytes; see §6.1 and [`decisions.md`](decisions.md) D-04. |
 | `provenance_type` | **yes** | string | `"self-deposited"` or `"observed-download"`. Governs trust semantics (§5). |
 | `record_accession` | opt | string | Deposition accession/ID this manifest describes (EGA `EGAD…`, GEO `GSE…`, BIA `…`). Cross-linking; lets a backend confirm it has the right manifest. |
 | `source_url` | opt* | string | Base location of the data. **Required by convention for `observed-download`** (where a reproducer re-fetches). For `self-deposited`, where we put it. Also the base against which `source_path` (§3.2) resolves. |
@@ -129,7 +161,7 @@ that matter.
 | `generator` | opt | string | Tool + version that wrote the file. Aids *our* debugging; not consumer-actionable, kept separate. |
 | `size` | **yes** | integer | Sum of all `files[].size`, bytes. (DVC `.dvc` top-level `size`.) Cheap sanity check; used by `dvc list`-style views. |
 | `nfiles` | **yes** | integer | Count of entries in `files` (recursive file count). (DVC `.dvc` top-level `nfiles`.) |
-| `body_hash` | **yes** | string | Hash (per `hash_algorithm`) of the canonicalised `files` array (§4). Enables standalone integrity checking; equals the DVC `.dir` hash when the body carries no extension fields. |
+| `body_hash` | **yes** | string | Hash (per `hash_algorithm`) of the canonicalised `files` array (§4). Enables standalone integrity checking. *(corrected v0.3)* This is **not** the DVC `.dir` hash under any circumstances — see the errata note and §4. |
 
 \* `opt*` = optional in schema but **required by convention** for the stated
 `provenance_type`; a validator SHOULD warn if missing for `observed-download`.
@@ -152,6 +184,7 @@ distinction, made explicit:
 | `source_path` | opt | string | **Deposit/source path** — where to *fetch* the bytes from, relative to `source_url`. Present only when the deposit layout differs from the workspace layout. **If omitted, `source_path == relpath`.** |
 | `isexec` | opt | bool | DVC-compat: execute bit. Rarely meaningful for scientific data; omit by default. Reserved so ingesting a DVC `.dir` with `isexec` doesn't collide. |
 | `version_id` | opt | string | DVC-compat: cloud-provider version ID for versioned buckets (e.g. S3). Reserved for future BIA/S3 use; omit otherwise. |
+| `etag` | opt | string | *(added v0.3)* The repository's native HTTP/S3 validator, as observed. **Supplementary and non-authoritative** — never the content hash, because an S3 multipart ETag depends on the part size used at upload and so is not a function of content alone. Sits *alongside* a real `md5`. Also DVC-compat (DVC's `Meta` has an `etag` field). See §6.1 and [`decisions.md`](decisions.md) D-04. |
 
 **Why two paths.** The **byte-fetcher** uses `source_path` (+ `source_url`) to
 *locate* bytes in the repository; the **materialiser** uses `relpath` to *place*
@@ -195,10 +228,9 @@ accompanying `.dvc`), a consumer can confirm the file list wasn't truncated or
 corrupted. Excludes the header, so it is **not self-referential** (the header
 contains `body_hash`; the body does not).
 
-**Canonicalisation — mirror DVC exactly (the single most important detail).**
-`body_hash` is computed over a canonical serialisation of the `files` array that
-matches DVC's `.dir` serialisation, NOT over on-disk formatting (which editors
-reformat). Rule:
+**Canonicalisation (the single most important detail).** *(frozen v0.3.)*
+`body_hash` is computed over a canonical serialisation of the `files` array, NOT
+over on-disk formatting (which editors reformat). Rule:
 
 ```
 # 1. Normalise each entry's relpath/source_path to NFC.
@@ -210,14 +242,46 @@ body_hash = HEX( hash_algorithm( canonical ) )
 ```
 
 - Independent of pretty-printing, key order, indentation.
-- **When the body carries only `{relpath, md5, size}` (no extension fields), this
-  canonical form equals a DVC `.dir`'s content, so `body_hash` == DVC's `.dir`
-  hash** — a DVC user can verify our manifest with DVC's own logic.
-- Extension fields (`source_path`, `isexec`, `version_id`) are included in the
-  canonical serialisation when present, so they are covered by `body_hash` — but
-  their presence means `body_hash` no longer equals a bare DVC `.dir` hash (expected).
-- **Lock this with test vectors** (§10). A reimplementation that canonicalises
-  *almost* identically produces non-matching hashes silently.
+- **Normalise before sorting, never the reverse.** NFD's combining marks sort
+  differently from the characters they compose into. In NFD, `"cafe\u0301"` sorts
+  *before* `"caff"` (compare `e` U+0065 with `f` U+0066); after NFC it is
+  `"caf\u00e9"`, which sorts *after* `"caff"` (U+00E9 > U+0066). Sort-then-normalise
+  silently yields the reverse order, and therefore a different hash.
+- **The sort key is the joined POSIX path as a plain string**, not a tuple of
+  components: `"a-b/x"` precedes `"a/b"` because `-` (U+002D) precedes `/`
+  (U+002F). Splitting into components first reverses them. This matches DVC.
+- **Duplicate `relpath` values are rejected, not sorted stably.** With two equal
+  sort keys the output would depend on input order, so there would be no canonical
+  form at all.
+- **No semantic rewriting.** Canonicalisation is a pure syntactic function of the
+  array it is given. In particular, a `source_path` that happens to equal its
+  `relpath` is **not** dropped, so such a manifest hashes differently from the
+  equivalent terse one. Writers omit redundant `source_path`; canonicalisers must
+  not remove it ([`decisions.md`](decisions.md) D-06).
+- Extension fields (`source_path`, `isexec`, `version_id`, `etag`) are included in
+  the canonical serialisation when present, so they are covered by `body_hash`.
+- **Locked by test vectors** (§11). A reimplementation that canonicalises *almost*
+  identically produces non-matching hashes silently.
+
+**DVC `.dir` interop — a derived value, not `body_hash`.** *(corrected v0.3.)*
+v0.2 claimed that a body carrying only `{relpath, md5, size}` has
+`body_hash == ` DVC's `.dir` hash. It does not: DVC drops `size` and serialises
+with default separators and ASCII escaping (§0). The equivalence is instead
+computed on demand, by projecting each entry down to `{md5, relpath}`, sorting by
+`relpath`, and serialising the way DVC does:
+
+```
+dvc_dir = json.dumps([{"md5": e.md5, "relpath": e.relpath} for e in sorted_entries],
+                     sort_keys=True).encode("utf-8")     # DEFAULT separators, ensure_ascii=True
+dvc_dir_hash = HEX( md5( dvc_dir ) )
+```
+
+That value is what a `.dvc` records as `md5: <hash>.dir`, so a DVC user can still
+verify a chirograph manifest with DVC's own logic — via `chiro dvc-dir` rather
+than by inspection. It is verified byte-for-byte against real `dvc add` output.
+Keeping it derived rather than making it *be* `body_hash` deliberately avoids
+welding a frozen format to a DVC implementation detail that has already changed
+once. See [`decisions.md`](decisions.md) D-01.
 
 ### Layer 3 — whole-file hash (external, in the `.dvc`)
 The committed `.dvc` records the md5 of the **entire `.chiro.json`** (header + body +
@@ -278,13 +342,25 @@ listable record root; the explicit-URL form is the guaranteed universal path.
 generic `manifest.chiro.json` — unambiguous in a flat deposit, sorts predictably, and
 survives being downloaded next to other records' manifests.
 
-### 6.1 The md5-vs-ETag reality (HTTP/S3 sources)
+### 6.1 The md5-vs-ETag reality (HTTP/S3 sources) — *resolved v0.3*
 DVC uses ETag (not md5) for HTTP/S3/GCS/Azure. For files **we deposit**, we compute
 real md5s regardless of transport. But for an `observed-download` manifest of an
 HTTP/S3 source, the validator the repo exposes *without downloading* may be an ETag,
-and S3 multipart ETags are **not** plain md5s. So an observed manifest MAY carry
-`hash_algorithm: "etag"` (or per-entry mixed — see open items) when a true md5 wasn't
-computed. Be honest about which it is rather than mislabel an ETag as md5.
+and S3 multipart ETags are **not** plain md5s.
+
+v0.2 left open whether such a manifest could carry `hash_algorithm: "etag"`.
+**Decision: it cannot.** An ETag is not a function of content alone — the same bytes
+uploaded with a different part size yield a different ETag — so it cannot address
+content (`chiro://etag:…` would not be immutable), cannot produce a meaningful
+`body_hash`, and cannot be recomputed by a consumer holding the file, which makes
+Layer-1 verification impossible. A manifest whose hashes cannot be checked is not a
+weaker manifest; it is a different, unverifiable artifact wearing the same name.
+
+So: **download and hash, or do not claim a hash.** Where an ETag is worth recording
+as corroborating evidence, put it in the per-entry `etag` field (§3.2) *next to* a
+real digest, which is honest about exactly which is which — the goal v0.2 was
+reaching for. Full reasoning and the reversal path in
+[`decisions.md`](decisions.md) D-04.
 
 ---
 
@@ -346,8 +422,25 @@ Deposit is flat (`GSE000000_sampleA_*`); workspace is nested (`sampleA/*`).
   ]
 }
 ```
-No `source_path` → deposit layout == workspace layout. The `files` array here is a
-valid DVC `.dir`; `body_hash` equals its DVC `.dir` hash.
+No `source_path` → deposit layout == workspace layout. *(corrected v0.3)* The
+`files` array here is valid input to DVC's `Tree.from_list`, but `body_hash` is
+**not** its DVC `.dir` hash — DVC drops `size` and serialises differently (§0, §4).
+Get the DVC hash with `chiro dvc-dir --hash-only`.
+
+### 8.3 Reproducing 8.1 with the reference CLI
+
+```bash
+chiro capture ./deposit \
+    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE000nnn/GSE000000/suppl/' \
+    --accession GSE000000 \
+    --relpath-from-source '^GSE000000_([^_]+)_(.*)$=>\1/\2' \
+    -o GSE000000.chiro.json
+```
+
+The walked tree is the **deposit** layout, so each walked path becomes
+`source_path` and the rule derives `relpath`. The inverse direction — a workspace
+tree you are about to deposit flat — is `--source-from-relpath`. See
+[`decisions.md`](decisions.md) D-14.
 
 ---
 
@@ -359,7 +452,7 @@ valid DVC `.dir`; `body_hash` equals its DVC `.dir` hash.
 2. Per file: record { relpath (NFC, /-sep), md5, size, [source_path if layout
    differs] }.  From DVC cache: md5 already exists → transcribe, don't recompute.
 3. Sort files by relpath.
-4. body_hash = HEX(hash_algorithm(canonicalise(files)))     # §4, DVC-matched
+4. body_hash = HEX(hash_algorithm(canonicalise(files)))     # §4
 5. size = sum(f.size); nfiles = len(files)
 6. Fill header (provenance_type, dates, source_url, accession, …).
 7. Serialise to <accession>.chiro.json (sorted, pretty on disk is fine — canonical
@@ -380,32 +473,120 @@ valid DVC `.dir`; `body_hash` equals its DVC `.dir` hash.
 ### Resolving a fetch location
 ```
 source = f.source_path if "source_path" in f else f.relpath
-fetch_url = urljoin(source_url, source)
-place_at = import_target / f.relpath
+base   = source_url if source_url.endswith("/") else source_url + "/"   # see below
+fetch_url = urljoin(base, percent_encode(source))
+place_at  = import_target / f.relpath
 ```
+
+*(added v0.3)* The trailing slash is load-bearing and easy to get wrong.
+`urljoin` treats a base without one as naming a *file* and discards its last
+segment, so `urljoin("https://x/suppl", "a.gz")` yields `https://x/a.gz` — silently
+wrong, and only visible as a 404 much later. `source_url` is documented as a *base*
+location (§3.1) and is therefore always directory-like, so normalise it. Paths must
+also be percent-encoded: spaces and `#` are legal in filenames (§3.2) and
+significant in URLs.
+
+The reference implementation exposes this as `Manifest.fetch_plan()`, which returns
+`(source, relpath, md5, size, url)` per entry — the intended integration point for
+a data-access layer such as `archivefs`.
 
 ---
 
-## 10. Open items (freeze before v1.0 final)
+## 10. Open items
 
-- **Hash algorithm:** default **md5** (DVC-aligned; `body_hash` == DVC `.dir` hash).
-  `hash_algorithm` allows `sha256` for callers who want it, at the cost of DVC
-  equivalence. Decide whether to *ever* emit sha256 or keep md5-only for v1.
-- **ETag on observed HTTP/S3 sources (§6.1):** decide whether `hash_algorithm` is
-  whole-file only, or whether per-entry algorithm is allowed (some md5, some etag) —
-  the latter is messier but more honest for mixed observed manifests. Likely: keep
-  whole-file `hash_algorithm`, and for observed HTTP/S3 either download-to-md5 or
-  mark the whole manifest `etag`.
+### Resolved in v0.3
+
+- ✅ **Canonicalisation test vectors.** Frozen and published — see §11. This was
+  the fragility point and the blocker on any second implementation.
+- ✅ **Hash algorithm.** `md5` (default) or `sha256`. sha256 exists for
+  environments where md5 is unavailable at all (FIPS-mode interpreters), at the
+  cost of DVC interop. Nothing else. ([`decisions.md`](decisions.md) D-03.)
+- ✅ **ETag on observed HTTP/S3 sources.** `hash_algorithm: "etag"` is **rejected**
+  in v1; a per-entry, non-authoritative `etag` field carries the repository's
+  validator alongside a real digest instead. (§6.1, D-04.)
+- ✅ **JSON Schema published** — `chirograph-1.0.schema.json`, `chiro schema`. Note
+  it can express a manifest's *shape* but not its integrity (no arithmetic, no
+  aggregation, no hashing), so schema validity is necessary and never sufficient.
+- ✅ **DVC-compat reserved fields.** `isexec`, `version_id` reserved and accepted;
+  not emitted by default. `etag` joins them (§3.2).
+- ✅ **Timestamps.** Must carry an explicit UTC offset; naive timestamps are
+  rejected. An `observed-download` manifest's whole claim is "these bytes at *this
+  instant*", which a naive timestamp does not express. (D-05.)
+- ✅ **Unknown fields.** Rejected at the reader's own `schema_version`, tolerated
+  and preserved at a higher *minor*. Since unknown fields are covered by
+  `body_hash`, tolerating them in one implementation and dropping them in another
+  would make one manifest hash two ways. (D-07.)
+
+### Still open
+
 - **Auto-discovery filename convention** per repo, and whether we control deposited
-  filenames on GEO / BIA / Zenodo.
-- **Canonicalisation test vectors:** lock cross-implementation determinism —
-  NFC normalisation, integer `size` serialisation, key ordering, extension-field
-  inclusion. This is the fragility point.
-- **DVC-compat reserved fields:** `isexec`, `version_id` reserved in the entry
-  namespace so ingesting a real DVC `.dir` never collides; not emitted by default.
-- **Top-level integrity of header:** accepted as unprotected in raw standalone use
-  (detectable as malformed JSON / body-hash mismatch in realistic corruption);
-  fully protected once DVC-tracked (Layer 3).
+  filenames on GEO / BIA / Zenodo. The convention itself is implemented
+  (accession-derived, `GSE12345.chiro.json`); which names each repository actually
+  permits is an empirical question needing those repositories. Low priority:
+  registry-first resolution demotes auto-discovery to a courtesy.
+- **Top-level integrity of the header:** accepted as unprotected in raw standalone
+  use (detectable as malformed JSON / body-hash mismatch in realistic corruption);
+  fully protected once DVC-tracked or `chiro://`-addressed (Layer 3).
+- **Whole-file vs canonical-document addressing.** A whole-file hash changes when
+  the JSON is re-indented, which is a sharp edge for a registry keyed on it. Both
+  forms are implemented (`chiro ref`, `chiro ref --canonical`); which one a registry
+  uses is a Milestone-2 decision. (D-09, and `ideas.md` §1.1.)
 - **JSON-Lines variant:** deferred; add non-breakingly via `schema_version` +
   a `content_encoding` marker only if a deposit's file count makes JSON parse-time
-  hurt (>~10^5 files).
+  hurt (>~10^5 files). Note the canonical form is already per-entry (`[` + entries
+  joined by `,` + `]`), so one canonicalisation rule could serve both encodings.
+
+---
+
+## 11. Conformance test vectors (normative)
+
+*(added v0.3.)* §4's canonicalisation is **frozen** and pinned by a published
+vector set. This section is normative: an implementation that does not reproduce
+every vector is not a Chirograph implementation.
+
+```bash
+chiro test-vectors            # print the vector set
+chiro test-vectors --check    # check this implementation against it
+chiro test-vectors --path     # where it lives
+```
+
+The vectors ship *inside* the package, so `pip download chirograph` is enough to
+get them — no clone required.
+
+**Design of the vector set**, in case it needs extending:
+
+- Each case carries the **exact canonical string**, not just its hash. Spec §4
+  warns that a near-miss reimplementation fails *silently*; a digest mismatch tells
+  you nothing, whereas a string diff tells you whether you got the separators, the
+  escaping, the sort, or the normalisation wrong.
+- Every hash can be re-derived **with no Chirograph code at all**:
+  `printf '%s' "<canonical>" | md5sum`. `tools/check_vectors_independently.sh` does
+  exactly that with coreutils, so the frozen values are not merely self-consistent
+  with the code that produced them.
+- A second digest (`canonical_sha256`) and a byte length accompany each case, so an
+  implementation without md5 available can still check itself.
+- The file is **pure ASCII** (`\uXXXX` escapes), because the NFC/NFD cases would
+  otherwise be un-reviewable — you cannot tell a composed from a decomposed
+  character by looking.
+- Each case records **why it exists** — which trap it pins.
+- `dvc_dir` / `dvc_dir_hash` accompany each case, covering the derived DVC interop
+  form (§0, §4) whose serialisation differs.
+
+Coverage includes: the empty array; key-order and input-order invariance; the
+hyphen-before-slash sort trap; case-sensitive codepoint ordering; NFD input
+normalisation; the normalise-*then*-sort ordering trap; literal-UTF-8 vs escaped
+non-ASCII; an astral-plane codepoint (4-byte UTF-8, surrogate pair in UTF-16);
+`2^53 + 1` as a size (exact as a JSON integer, lossy as an IEEE-754 double);
+zero-size; duplicate digests at two paths; the redundant-vs-terse `source_path`
+pair (D-06); all extension fields at once; sha256; and 200 entries in an
+adversarial order.
+
+Alongside them: **path-safety** accept/reject vectors (§3.2 is a security boundary
+— consumers materialise `relpath` to disk, and `observed-download` manifests
+describe other people's deposits) and **whole-manifest** valid/invalid documents
+naming the error each must raise.
+
+**These values must never change.** If one is wrong, publish a corrected set under
+a new `spec_version` rather than editing in place — other implementations are
+checking themselves against them, and silently moving the goalposts is the exact
+failure the vectors exist to prevent.

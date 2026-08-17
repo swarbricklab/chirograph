@@ -1,0 +1,521 @@
+"""The CLI, driven in-process.
+
+Exit codes get their own attention because they are the contract a registry's CI
+depends on: 0 success, 1 a finding, 2 the tool could not run. Conflating 1 and 2
+would make a merge gate treat "this manifest is a lie" and "the file was missing"
+identically.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from chirograph.cli import EXIT_ERROR, EXIT_FINDING, EXIT_OK, main
+from chirograph.manifest import Manifest
+
+
+def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
+    code = main(list(argv))
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+@pytest.fixture
+def built(tree: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Path:
+    target = tmp_path / "GSE1.chiro.json"
+    code, _, _ = run(capsys, "write", str(tree), "--accession", "GSE1", "-o", str(target))
+    assert code == EXIT_OK
+    return target
+
+
+# --------------------------------------------------------------------------- #
+# Plumbing
+# --------------------------------------------------------------------------- #
+
+
+def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, _ = run(capsys)
+    assert code == EXIT_ERROR
+    assert "COMMAND" in out
+
+
+def test_version(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as caught:
+        main(["--version"])
+    assert caught.value.code == 0
+    assert "chirograph" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# write
+# --------------------------------------------------------------------------- #
+
+
+def test_write_produces_a_loadable_manifest(built: Path) -> None:
+    manifest = Manifest.load(built)
+    assert manifest.nfiles == 3
+    assert manifest.record_accession == "GSE1"
+
+
+def test_write_reports_the_reference(tree: Path, tmp_path: Path, capsys) -> None:
+    code, _, err = run(capsys, "write", str(tree), "-o", str(tmp_path / "m.chiro.json"))
+    assert code == EXIT_OK
+    assert "chiro://md5:" in err
+    assert "body_hash" in err
+
+
+def test_write_to_stdout_emits_only_json(tree: Path, capsys) -> None:
+    code, out, err = run(capsys, "write", str(tree), "--stdout")
+    assert code == EXIT_OK
+    assert json.loads(out)["schema"] == "chirograph"
+    assert err == ""  # nothing must contaminate a piped manifest
+
+
+def test_write_dry_run_writes_nothing(tree: Path, tmp_path: Path, capsys) -> None:
+    target = tmp_path / "nope.chiro.json"
+    code, _, err = run(capsys, "write", str(tree), "-o", str(target), "--dry-run")
+    assert code == EXIT_OK
+    assert not target.exists()
+    assert "dry run" in err
+
+
+def test_write_needs_exactly_one_source(tree: Path, capsys) -> None:
+    code, _, err = run(capsys, "write")
+    assert code == EXIT_ERROR
+    assert "either a directory or --from-dvc-cache" in err
+
+
+def test_write_rejects_both_sources(tree: Path, capsys) -> None:
+    code, _, _ = run(capsys, "write", str(tree), "--from-dvc-cache", "x.dvc")
+    assert code == EXIT_ERROR
+
+
+def test_write_with_rewrite_rule(tmp_path: Path, capsys) -> None:
+    deposit = tmp_path / "deposit"
+    deposit.mkdir()
+    (deposit / "GSE1_sampleA_barcodes.tsv.gz").write_bytes(b"hello\n")
+    target = tmp_path / "out.chiro.json"
+    code, _, _ = run(
+        capsys,
+        "capture",
+        str(deposit),
+        "--source-url",
+        "https://example.org/suppl/",
+        "--relpath-from-source",
+        r"^GSE1_([^_]+)_(.*)$=>\1/\2",
+        "-o",
+        str(target),
+    )
+    assert code == EXIT_OK
+    manifest = Manifest.load(target)
+    assert manifest.files[0].relpath == "sampleA/barcodes.tsv.gz"
+    assert manifest.files[0].source_path == "GSE1_sampleA_barcodes.tsv.gz"
+
+
+def test_write_bad_rewrite_rule_is_a_usage_error(tree: Path, capsys) -> None:
+    code, _, err = run(
+        capsys, "write", str(tree), "--relpath-from-source", "no-separator", "--stdout"
+    )
+    assert code == EXIT_ERROR
+    assert "REGEX" in err
+
+
+def test_write_exclude_flag(tree: Path, capsys) -> None:
+    code, out, _ = run(capsys, "write", str(tree), "--stdout", "--exclude", "*.mtx")
+    assert code == EXIT_OK
+    paths = [entry["relpath"] for entry in json.loads(out)["files"]]
+    assert not any(path.endswith(".mtx") for path in paths)
+
+
+def test_write_sha256(tree: Path, capsys) -> None:
+    code, out, _ = run(capsys, "write", str(tree), "--stdout", "--hash-algorithm", "sha256")
+    assert code == EXIT_OK
+    assert len(json.loads(out)["body_hash"]) == 64
+
+
+def test_capture_requires_source_url(tree: Path, capsys) -> None:
+    with pytest.raises(SystemExit):
+        main(["capture", str(tree)])
+
+
+def test_capture_lints_clean(tree: Path, capsys) -> None:
+    code, _, err = run(capsys, "capture", str(tree), "--source-url", "https://x/", "--stdout")
+    assert code == EXIT_OK
+    assert "warning" not in err
+
+
+# --------------------------------------------------------------------------- #
+# verify
+# --------------------------------------------------------------------------- #
+
+
+def test_verify_clean_tree(built: Path, tree: Path, capsys) -> None:
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree))
+    assert code == EXIT_OK
+    assert out.strip().endswith("OK")
+
+
+def test_verify_detects_tampering(built: Path, tree: Path, capsys) -> None:
+    (tree / "sampleA" / "barcodes.tsv").write_bytes(b"HELLO\n")
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree))
+    assert code == EXIT_FINDING
+    assert "FAIL hash-mismatch" in out
+    assert out.strip().endswith("FAILED")
+
+
+def test_verify_json_report(built: Path, tree: Path, capsys) -> None:
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree), "--json")
+    assert code == EXIT_OK
+    payload = json.loads(out)
+    assert payload["ok"] is True
+    assert payload["verification_level"] == "tier2b-full"
+
+
+def test_verify_layer_2_is_tier1(built: Path, tree: Path, capsys) -> None:
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree), "--layer", "2", "--json")
+    assert code == EXIT_OK
+    assert json.loads(out)["verification_level"] == "tier1"
+
+
+def test_verify_strict_makes_extra_files_fail(built: Path, tree: Path, capsys) -> None:
+    (tree / "derived.h5ad").write_bytes(b"x")
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree))
+    assert code == EXIT_OK
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree), "--strict")
+    assert code == EXIT_FINDING
+    assert "FAIL extra" in out
+
+
+def test_verify_defaults_the_root_to_the_manifests_directory(tree: Path, capsys) -> None:
+    target = tree / ".." / "m.chiro.json"
+    run(capsys, "write", str(tree), "-o", str(tree.parent / "m.chiro.json"))
+    # The manifest sits next to `data/`, so the default root has no matching files.
+    code, _, _ = run(capsys, "verify", str(tree.parent / "m.chiro.json"))
+    assert code == EXIT_FINDING  # correct: files are under data/, not alongside
+    code, _, _ = run(capsys, "verify", str(tree.parent / "m.chiro.json"), "--root", str(tree))
+    assert code == EXIT_OK
+    assert target
+
+
+def test_verify_missing_manifest_is_a_tool_error(capsys) -> None:
+    code, _, err = run(capsys, "verify", "/nonexistent/x.chiro.json")
+    assert code == EXIT_ERROR
+    assert "No such file" in err or "not exist" in err
+
+
+def test_verify_corrupt_manifest_is_a_finding(tmp_path: Path, capsys) -> None:
+    """A manifest that lies about itself is a finding, not a tool failure."""
+    target = tmp_path / "bad.chiro.json"
+    document = json.loads(Manifest(files=[], created="2026-01-01T00:00:00Z").to_json())
+    document["body_hash"] = "0" * 32
+    target.write_text(json.dumps(document))
+    code, _, err = run(capsys, "verify", str(target))
+    assert code == EXIT_FINDING
+    assert "BodyHashMismatch" in err
+
+
+def test_verify_sample(built: Path, tree: Path, capsys) -> None:
+    code, out, _ = run(capsys, "verify", str(built), "--root", str(tree), "--sample", "1", "--json")
+    assert code == EXIT_OK
+    payload = json.loads(out)
+    assert payload["checked"] == 1
+    assert payload["verification_level"] == "tier2b-sampled"
+
+
+# --------------------------------------------------------------------------- #
+# validate
+# --------------------------------------------------------------------------- #
+
+
+def test_validate_ok(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "validate", str(built))
+    assert code == EXIT_OK
+    assert out.startswith("OK ")
+
+
+def test_validate_with_jsonschema(built: Path, capsys) -> None:
+    pytest.importorskip("jsonschema")
+    code, _, _ = run(capsys, "validate", str(built), "--jsonschema")
+    assert code == EXIT_OK
+
+
+def test_validate_reports_lint_warnings(tmp_path: Path, capsys) -> None:
+    manifest = Manifest(
+        provenance_type="observed-download",
+        files=[],
+        created="2026-01-01T00:00:00Z",
+    )
+    target = manifest.dump(tmp_path / "warn.chiro.json")
+    code, out, _ = run(capsys, "validate", str(target))
+    assert code == EXIT_OK  # warnings are not failures...
+    assert "observed-missing-source-url" in out
+    code, _, _ = run(capsys, "validate", str(target), "--strict-lint")
+    assert code == EXIT_FINDING  # ...unless asked
+
+
+def test_validate_multiple_and_json(built: Path, tmp_path: Path, capsys) -> None:
+    broken = tmp_path / "broken.chiro.json"
+    broken.write_text("{not json")
+    code, out, _ = run(capsys, "validate", str(built), str(broken), "--json")
+    assert code == EXIT_ERROR
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert len(payload["manifests"]) == 2
+
+
+# --------------------------------------------------------------------------- #
+# info / ls / diff / ref / remap / dvc-dir
+# --------------------------------------------------------------------------- #
+
+
+def test_info(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "info", str(built))
+    assert code == EXIT_OK
+    assert "body_hash" in out
+    assert "registry_shard_path" in out
+    assert "dvc_dir_hash" in out
+
+
+def test_info_json(built: Path, capsys) -> None:
+    _, out, _ = run(capsys, "info", str(built), "--json")
+    payload = json.loads(out)
+    assert payload["nfiles"] == 3
+    assert payload["reference"].startswith("chiro://md5:")
+    assert payload["canonical_reference"] != payload["reference"]
+
+
+def test_ls(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "ls", str(built))
+    assert code == EXIT_OK
+    assert out.splitlines() == [
+        "sampleA/barcodes.tsv",
+        "sampleA/matrix.mtx",
+        "sampleB/barcodes.tsv",
+    ]
+
+
+def test_ls_long_and_json(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "ls", str(built), "-l")
+    assert code == EXIT_OK
+    assert "b1946ac92492d2347c6235b4d2611184" in out
+    code, out, _ = run(capsys, "ls", str(built), "--json")
+    assert len(json.loads(out)) == 3
+
+
+def test_diff(built: Path, tree: Path, tmp_path: Path, capsys) -> None:
+    (tree / "sampleA" / "barcodes.tsv").write_bytes(b"CHANGED\n")
+    later = tmp_path / "later.chiro.json"
+    run(capsys, "write", str(tree), "--accession", "GSE1", "-o", str(later))
+
+    code, out, _ = run(capsys, "diff", str(built), str(later))
+    assert code == EXIT_OK  # no --exit-code
+    assert "changed sampleA/barcodes.tsv" in out
+
+    code, _, _ = run(capsys, "diff", str(built), str(later), "--exit-code")
+    assert code == EXIT_FINDING
+
+
+def test_diff_identical(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "diff", str(built), str(built), "--exit-code")
+    assert code == EXIT_OK
+    assert "identical" in out
+
+
+def test_ref_and_check(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "ref", str(built))
+    assert code == EXIT_OK
+    reference = out.strip()
+    assert reference.startswith("chiro://md5:")
+
+    code, out, _ = run(capsys, "ref", str(built), "--check", reference)
+    assert code == EXIT_OK
+    assert out.startswith("OK")
+
+    code, out, _ = run(capsys, "ref", str(built), "--check", "chiro://md5:" + "0" * 32)
+    assert code == EXIT_FINDING
+    assert "MISMATCH" in out
+
+
+def test_ref_shard(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "ref", str(built), "--shard")
+    assert code == EXIT_OK
+    assert out.splitlines()[1].startswith("manifests/")
+
+
+def test_ref_canonical_differs(built: Path, capsys) -> None:
+    _, plain, _ = run(capsys, "ref", str(built))
+    _, canonical, _ = run(capsys, "ref", str(built), "--canonical")
+    assert plain.strip() != canonical.strip()
+
+
+def test_ref_algorithm_mismatch_is_a_usage_error(built: Path, capsys) -> None:
+    code, _, err = run(capsys, "ref", str(built), "--check", "chiro://sha256:" + "0" * 64)
+    assert code == EXIT_ERROR
+    assert "--algorithm sha256" in err
+
+
+def test_remap(built: Path, tmp_path: Path, capsys) -> None:
+    out_path = tmp_path / "remapped.chiro.json"
+    code, _, err = run(
+        capsys,
+        "remap",
+        str(built),
+        "--source-from-relpath",
+        r"^(.*)/(.*)$=>GSE1_\1_\2",
+        "-o",
+        str(out_path),
+    )
+    assert code == EXIT_OK
+    assert "body_hash" in err
+    manifest = Manifest.load(out_path)
+    assert manifest.entry("sampleA/barcodes.tsv").source_path == "GSE1_sampleA_barcodes.tsv"
+
+
+def test_remap_tidy_drops_redundant_source_paths(tmp_path: Path, capsys) -> None:
+    from chirograph.manifest import FileEntry
+
+    manifest = Manifest(
+        files=[FileEntry("a.txt", "b1946ac92492d2347c6235b4d2611184", 6, source_path="a.txt")],
+        created="2026-01-01T00:00:00Z",
+    )
+    source = manifest.dump(tmp_path / "in.chiro.json")
+    target = tmp_path / "out.chiro.json"
+    code, _, _ = run(capsys, "remap", str(source), "--tidy", "-o", str(target))
+    assert code == EXIT_OK
+    assert Manifest.load(target).files[0].source_path is None
+
+
+def test_remap_rejects_both_directions(built: Path, capsys) -> None:
+    code, _, err = run(
+        capsys,
+        "remap",
+        str(built),
+        "--relpath-from-source",
+        r"^(.*)$=>x/\1",
+        "--source-from-relpath",
+        r"^(.*)$=>y/\1",
+        "--stdout",
+    )
+    assert code == EXIT_ERROR
+    assert "not both" in err
+
+
+def test_dvc_dir_hash_only(built: Path, capsys) -> None:
+    code, out, _ = run(capsys, "dvc-dir", str(built), "--hash-only")
+    assert code == EXIT_OK
+    assert len(out.strip()) == 32
+
+
+def test_dvc_dir_explains_that_it_is_not_body_hash(built: Path, capsys) -> None:
+    code, out, err = run(capsys, "dvc-dir", str(built))
+    assert code == EXIT_OK
+    assert json.loads(out)  # valid JSON array
+    assert "NOT the manifest's" in err
+
+
+# --------------------------------------------------------------------------- #
+# schema / test-vectors
+# --------------------------------------------------------------------------- #
+
+
+def test_schema_command(capsys) -> None:
+    code, out, _ = run(capsys, "schema")
+    assert code == EXIT_OK
+    assert json.loads(out)["title"].startswith("Chirograph manifest")
+
+
+def test_schema_path(capsys) -> None:
+    code, out, _ = run(capsys, "schema", "--path")
+    assert code == EXIT_OK
+    assert Path(out.strip()).is_file()
+
+
+def test_test_vectors_dump(capsys) -> None:
+    code, out, _ = run(capsys, "test-vectors")
+    assert code == EXIT_OK
+    assert json.loads(out)["format"] == "chirograph-test-vectors"
+
+
+def test_test_vectors_check_passes(capsys) -> None:
+    """The shipped conformance suite must pass against its own implementation."""
+    code, out, _ = run(capsys, "test-vectors", "--check")
+    assert code == EXIT_OK
+    assert "conformance checks passed" in out
+    assert "FAIL" not in out
+
+
+# --------------------------------------------------------------------------- #
+# End-to-end story
+# --------------------------------------------------------------------------- #
+
+
+def test_full_deposit_workflow(tmp_path: Path, capsys) -> None:
+    """The workflow the plan cares about: reorganise, publish, verify, detect drift."""
+    deposit = tmp_path / "deposit"
+    deposit.mkdir()
+    (deposit / "GSE7_sampleA_barcodes.tsv.gz").write_bytes(b"barcodes\n")
+    (deposit / "GSE7_sampleA_matrix.mtx.gz").write_bytes(b"matrix\n")
+    manifest_path = tmp_path / "GSE7.chiro.json"
+
+    # 1. Capture what was downloaded, reorganised into a workspace layout.
+    code, _, _ = run(
+        capsys,
+        "capture",
+        str(deposit),
+        "--source-url",
+        "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE7nnn/GSE7/suppl/",
+        "--accession",
+        "GSE7",
+        "--relpath-from-source",
+        r"^GSE7_([^_]+)_(.*)$=>\1/\2",
+        "-o",
+        str(manifest_path),
+    )
+    assert code == EXIT_OK
+
+    # 2. Tier-1: the manifest is internally sound.
+    assert run(capsys, "validate", str(manifest_path))[0] == EXIT_OK
+
+    # 3. Tier-2b: the bytes match, checked in the deposit layout.
+    assert (
+        run(capsys, "verify", str(manifest_path), "--root", str(deposit), "--source-layout")[0]
+        == EXIT_OK
+    )
+
+    # 4. The manifest has a stable, self-validating address.
+    _, reference, _ = run(capsys, "ref", str(manifest_path))
+    assert run(capsys, "ref", str(manifest_path), "--check", reference.strip())[0] == EXIT_OK
+
+    # 5. Upstream mutates. Verification notices, and says why.
+    (deposit / "GSE7_sampleA_matrix.mtx.gz").write_bytes(b"matrix v2\n")
+    code, out, _ = run(
+        capsys, "verify", str(manifest_path), "--root", str(deposit), "--source-layout"
+    )
+    assert code == EXIT_FINDING
+    assert "upstream record mutated" in out
+
+    # 6. Capturing again and diffing produces the drift report.
+    later = tmp_path / "GSE7-later.chiro.json"
+    run(
+        capsys,
+        "capture",
+        str(deposit),
+        "--source-url",
+        "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE7nnn/GSE7/suppl/",
+        "--accession",
+        "GSE7",
+        "--relpath-from-source",
+        r"^GSE7_([^_]+)_(.*)$=>\1/\2",
+        "-o",
+        str(later),
+    )
+    code, out, _ = run(capsys, "diff", str(manifest_path), str(later), "--exit-code")
+    assert code == EXIT_FINDING
+    assert "changed sampleA/matrix.mtx.gz" in out
+    assert "upstream drift" in out
+
+    # 7. The old manifest is still valid — nothing was destroyed.
+    assert run(capsys, "validate", str(manifest_path))[0] == EXIT_OK
