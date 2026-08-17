@@ -401,7 +401,7 @@ reaching for. Full reasoning and the reversal path in
 Deposit is flat (`GSE000000_sampleA_*`); workspace is nested (`sampleA/*`).
 `source_path` routes the fetch; `relpath` places the file.
 
-### 8.2 Observed-download, layout preserved (reference dataset, DVC-`.dir`-equivalent body)
+### 8.2 Observed-download, layout preserved (reference dataset, DVC-`.dir`-shaped body)
 
 ```json
 {
