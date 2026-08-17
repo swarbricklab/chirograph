@@ -60,31 +60,32 @@ def human_bytes(count: int) -> str:
     return f"{count} ({value:.1f} {units[index]})" if index else f"{count} B"
 
 
-def _json_safe(value: object) -> object:
-    """Replace unpaired surrogates with a literal, escapable spelling.
-
-    A filename whose bytes are not valid UTF-8 arrives as surrogates, and a
-    surrogate cannot appear in a JSON document at all: RFC 8259 forbids it, Go's
-    ``encoding/json`` silently substitutes U+FFFD, and ``serde_json`` errors. So
-    emitting one produces output that a CI gate written in another language either
-    mangles or rejects — worse than the hard failure it replaced.
-
-    ``backslashreplace`` turns each surrogate into the *characters* ``\\udcff``,
-    including a real backslash, which ``json.dumps`` then escapes to ``\\\\udcff``.
-    The result is valid JSON, unambiguous, and still recognisably the offending
-    filename.
-    """
-    if isinstance(value, str):
-        return value.encode("utf-8", "backslashreplace").decode("utf-8")
-    if isinstance(value, dict):
-        return {str(_json_safe(k)): _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return value
-
-
 def emit_json(payload: object, stream: TextIO) -> None:
-    json.dump(_json_safe(payload), stream, indent=2, ensure_ascii=False, default=str)
+    """Write *payload* as JSON.
+
+    .. rubric:: Filenames that are not valid UTF-8
+
+    A path whose bytes are not valid UTF-8 reaches us as unpaired surrogates
+    (Python's ``surrogateescape``). Such a path is emitted as a ``\\uDCxx`` escape:
+    syntactically valid JSON, and losslessly recoverable by a Python consumer, but
+    RFC 8259 §8.2 marks unpaired surrogates as not interoperable — Go's
+    ``encoding/json`` substitutes U+FFFD and ``serde_json`` rejects them.
+
+    A previous version rewrote them to a literal-backslash spelling to satisfy
+    RFC 8259. That was worse. The result could not be turned back into a filename,
+    so a consumer could no longer act on the report; and a directory holding both
+    a file with an invalid byte and one *literally* named with those six characters
+    collapsed to one indistinguishable string, so a consumer that deduplicates saw
+    one extra file where two existed. Losing recoverability and uniqueness to gain
+    cross-language politeness is the wrong trade for a report whose whole purpose is
+    to name a file precisely.
+
+    Consumers in other languages should treat such entries as opaque. The registry's
+    drift-report format is where this needs a real answer (docs/ideas.md): it should
+    carry the raw bytes in a dedicated, explicitly-encoded field rather than trying
+    to squeeze them into a JSON string.
+    """
+    json.dump(payload, stream, indent=2, ensure_ascii=False, default=str)
     stream.write("\n")
 
 
@@ -860,7 +861,9 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             entry["nfiles"] = manifest.nfiles
             entry["size"] = manifest.size
             entry["body_hash"] = manifest.body_hash
-            entry["reference"] = str(ChiroRef.for_path(name, manifest.hash_algorithm))
+            # From the bytes already read: a second open would be a TOCTOU window
+            # and could raise outside this loop's handler, aborting the batch.
+            entry["reference"] = str(ChiroRef.for_bytes(raw, manifest.hash_algorithm))
 
         failed = bool(errors) or (args.strict_lint and bool(warnings))
         entry.update(ok=not failed, errors=errors, warnings=warnings)
@@ -994,21 +997,27 @@ def cmd_diff(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 
 def cmd_ref(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     path = Path(args.manifest)
-    if args.canonical:
-        manifest = Manifest.load(path)
-        reference = canonical_ref(manifest, args.algorithm)
-    else:
-        # Confirm the file *is* a manifest before minting a reference to it. The
-        # reference asserts "this is manifest X"; producing one for a UTF-16 file or
-        # a truncated JSON blob would let a registry store something that is not a
-        # manifest under a chiro:// address — the very failure mode the encoding
-        # rule (spec §1.2) exists to prevent. `ChiroRef.for_path` stays a pure
-        # byte-level hash, because that is the right primitive for a library.
-        if not args.no_validate:
-            Manifest.load(path)
-        reference = ChiroRef.for_path(path, args.algorithm)
+    if args.canonical and args.no_validate:
+        # --canonical has to parse the manifest to canonicalise it, so the flag
+        # cannot be honoured. Saying so beats accepting and ignoring it.
+        err.write("--canonical requires parsing the manifest, so --no-validate cannot apply\n")
+        return EXIT_ERROR
+
+    # Read the bytes ONCE, then validate *those bytes* and hash *those bytes*.
+    # Validating via one open and hashing via another is a real TOCTOU: swap the
+    # file between them and the minted chiro:// address names content that was
+    # never checked. Demonstrated with an os.replace during the parse of a large
+    # manifest. It also halves the work — `chiro ref` on an 18 MB manifest went
+    # from 0.5 s to 10 s when the validating parse was added on top of a second read.
+    raw = read_manifest_bytes(path)
 
     if args.check:
+        # `--check REF` asks a *byte-identity* question: "did I fetch the right
+        # manifest?" Validating here would report failure for a byte-perfect
+        # download of a manifest that has a finding, and would collapse "wrong
+        # download" and "invalid manifest" into one exit code. Deliberately not
+        # validated; use `chiro validate` for that, which is a separate question.
+        reference = ChiroRef.for_bytes(raw, args.algorithm)
         expected = ChiroRef.parse(args.check)
         if expected.algorithm != reference.algorithm:
             err.write(
@@ -1025,6 +1034,19 @@ def cmd_ref(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
                 + "\n"
             )
         return EXIT_OK if matched else EXIT_FINDING
+
+    if args.canonical:
+        reference = canonical_ref(Manifest.loads(raw), args.algorithm)
+    else:
+        # Confirm the bytes *are* a manifest before minting a reference to them. The
+        # reference asserts "this is manifest X"; producing one for a UTF-16 file or
+        # a truncated JSON blob would let a registry store something that is not a
+        # manifest under a chiro:// address — the failure mode spec §1.2 exists to
+        # prevent. `ChiroRef.for_bytes` stays a pure hash, the right library
+        # primitive.
+        if not args.no_validate:
+            Manifest.loads(raw)
+        reference = ChiroRef.for_bytes(raw, args.algorithm)
 
     if args.json:
         emit_json({"reference": str(reference), "shard_path": reference.shard_path}, out)

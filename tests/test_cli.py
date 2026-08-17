@@ -9,7 +9,6 @@ identically.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -799,35 +798,6 @@ def test_ref_refuses_to_mint_a_reference_for_a_non_manifest(
     assert out.startswith("chiro://md5:")
 
 
-def test_json_output_is_portable_when_a_filename_has_no_valid_utf8(tmp_path: Path, capsys) -> None:
-    """Unpaired surrogates are forbidden in JSON (RFC 8259).
-
-    Emitting them gave a document that Go silently mangles and serde_json rejects —
-    worse for a CI gate than the hard failure it replaced.
-    """
-    root = tmp_path / "tree"
-    root.mkdir()
-    (root / "a.txt").write_bytes(b"listed\n")
-    target = tmp_path / "m.chiro.json"
-    assert run(capsys, "write", str(root), "-o", str(target))[0] == EXIT_OK
-    try:
-        with open(bytes(root) + b"/stray-\xff\xfe.dat", "wb") as handle:
-            handle.write(b"x\n")
-    except OSError:  # pragma: no cover
-        pytest.skip("filesystem will not create a non-UTF-8 filename")
-
-    code, out, _ = run(
-        capsys, "verify", str(target), "--root", str(root), "--check-extra", "--json"
-    )
-    assert code == EXIT_OK
-    payload = json.loads(out)
-    # The document, and every string in it, must survive a UTF-8 round trip.
-    out.encode("utf-8")
-    for name in payload["extra_files"]:
-        name.encode("utf-8")
-    assert any("udcff" in name for name in payload["extra_files"])
-
-
 def test_validate_batch_survives_json_value_errors(built: Path, tmp_path: Path, capsys) -> None:
     """json.loads raises plain ValueError for a huge integer, not JSONDecodeError."""
     bigint = tmp_path / "bigint.chiro.json"
@@ -846,74 +816,136 @@ def test_validate_labels_a_tool_failure_as_error_not_invalid(tmp_path: Path, cap
     assert "INVALID" not in out
 
 
-def test_validate_refuses_a_fifo_rather_than_blocking(tmp_path: Path, capsys) -> None:
-    """Reading a FIFO blocks forever, which in CI is a hung job, not a failed one."""
-    fifo = tmp_path / "pipe.chiro.json"
-    try:
-        os.mkfifo(fifo)
-    except (AttributeError, OSError):  # pragma: no cover
-        pytest.skip("cannot create a FIFO here")
-    code, out, _ = run(capsys, "validate", str(fifo))
-    assert code == EXIT_ERROR
-    assert "not a regular file" in out
+# --------------------------------------------------------------------------- #
+# Regressions from the fourth review pass
+# --------------------------------------------------------------------------- #
 
 
-def test_validate_batch_is_not_stopped_by_a_fifo(built: Path, tmp_path: Path, capsys) -> None:
-    fifo = tmp_path / "pipe.chiro.json"
-    try:
-        os.mkfifo(fifo)
-    except (AttributeError, OSError):  # pragma: no cover
-        pytest.skip("cannot create a FIFO here")
-    code, out, _ = run(capsys, "validate", str(built), str(fifo), str(built))
-    assert code == EXIT_ERROR
-    assert out.count("OK ") == 2
+def test_streaming_a_manifest_from_a_pipe_works(built: Path, capsys) -> None:
+    """`chiro validate <(curl ...)` and `... | chiro validate /dev/stdin`.
+
+    These are the idioms for checking a manifest you never wrote to disk — exactly
+    what a registry's CI wants. An earlier attempt to stop a writerless FIFO
+    blocking refused every non-regular file, which broke both, because process
+    substitution *is* a FIFO. There is no guard that stops the hang and keeps these
+    working, and keeping them wins: pointing any tool at a writerless FIFO blocks
+    (`cat`, `jq`, `md5sum` all do), so that behaviour is unsurprising and explicitly
+    requested by the path the user typed.
+    """
+    import subprocess
+    import sys
+
+    for argv in (["validate"], ["info"], ["ls"], ["ref"]):
+        result = subprocess.run(
+            [sys.executable, "-m", "chirograph.cli", *argv, "/dev/stdin"],
+            input=built.read_bytes(),
+            capture_output=True,
+        )
+        assert result.returncode == EXIT_OK, (argv, result.stderr.decode())
 
 
-def test_validate_rejects_a_directory(tmp_path: Path, capsys) -> None:
+def test_a_directory_is_still_refused_with_a_clear_message(tmp_path: Path, capsys) -> None:
     code, out, _ = run(capsys, "validate", str(tmp_path))
     assert code == EXIT_ERROR
     assert "is a directory" in out
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["validate", "{fifo}"],
-        ["verify", "{fifo}"],
-        ["info", "{fifo}"],
-        ["ls", "{fifo}"],
-        ["ref", "{fifo}"],
-        ["dvc-dir", "{fifo}"],
-        ["remap", "{fifo}", "--stdout"],
-        ["diff", "{good}", "{fifo}"],
-    ],
-    ids=lambda argv: argv[0],
-)
-def test_no_command_hangs_on_a_fifo(built: Path, tmp_path: Path, capsys, argv: list[str]) -> None:
-    """The check was first added to `validate` alone; seven commands still hung.
+def test_ref_hashes_the_bytes_it_validated(built: Path, tmp_path: Path, capsys) -> None:
+    """No TOCTOU: validating via one open and hashing via another let a swap
+    between them mint a reference naming content that was never checked.
 
-    A hung CI job is worse than a failed one, so the guard now lives in the single
-    read path (`read_manifest_bytes`) rather than in one command. No timeout is
-    needed here: if this regresses, the test hangs and that is the signal.
+    Checked here by construction rather than by racing: the reference must equal the
+    hash of the bytes on disk at the moment of the single read.
     """
-    fifo = tmp_path / "pipe.chiro.json"
-    try:
-        os.mkfifo(fifo)
-    except (AttributeError, OSError):  # pragma: no cover
-        pytest.skip("cannot create a FIFO here")
-    resolved = [a.format(fifo=str(fifo), good=str(built)) for a in argv]
-    code, _, _ = run(capsys, *resolved)
+    import hashlib
+
+    code, out, _ = run(capsys, "ref", str(built))
+    assert code == EXIT_OK
+    expected = hashlib.md5(built.read_bytes(), usedforsecurity=False).hexdigest()
+    assert out.strip() == f"chiro://md5:{expected}"
+
+
+def test_ref_check_is_a_byte_question_not_a_validity_one(
+    built: Path, tmp_path: Path, capsys
+) -> None:
+    """`--check REF` asks "did I fetch the right manifest?".
+
+    Validating on that path reported failure for a byte-perfect download of a
+    manifest that merely has a finding, and collapsed "wrong download" and "invalid
+    manifest" into one exit code.
+    """
+    import hashlib
+
+    stale = tmp_path / "stale.chiro.json"
+    document = json.loads(built.read_text())
+    document["body_hash"] = "0" * 32
+    stale.write_text(json.dumps(document, indent=2) + "\n")
+    digest = hashlib.md5(stale.read_bytes(), usedforsecurity=False).hexdigest()
+
+    # The bytes match, so --check succeeds even though the manifest is invalid.
+    code, out, _ = run(capsys, "ref", str(stale), "--check", f"chiro://md5:{digest}")
+    assert code == EXIT_OK
+    assert out.startswith("OK")
+
+    # A real byte mismatch is still a finding, and --json still emits.
+    code, out, _ = run(capsys, "ref", str(stale), "--check", "chiro://md5:" + "0" * 32, "--json")
+    assert code == EXIT_FINDING
+    assert json.loads(out)["ok"] is False
+
+    # Plain `ref` still refuses it — that IS the validity question.
+    assert run(capsys, "ref", str(stale))[0] == EXIT_FINDING
+
+
+@pytest.mark.parametrize(
+    "argv", [["ref"], ["info"], ["ls"], ["verify"], ["dvc-dir"], ["validate"]], ids=lambda a: a[0]
+)
+def test_no_command_leaks_a_traceback_on_pathological_json(
+    tmp_path: Path, capsys, argv: list[str]
+) -> None:
+    """`json.loads` raises plain ValueError for a huge int and RecursionError for
+    deep nesting. Translating both in `Manifest.loads` covers every command at once.
+    """
+    for name, text in (
+        ("deep.chiro.json", "[" * 100_000 + "]" * 100_000),
+        ("bigint.chiro.json", '{"schema":"chirograph","n":' + "9" * 5000 + "}"),
+    ):
+        target = tmp_path / name
+        target.write_text(text)
+        code, out, err = run(capsys, *argv, str(target))
+        assert code == EXIT_FINDING, (name, argv)
+        assert "Traceback" not in out + err
+
+
+def test_canonical_and_no_validate_are_mutually_exclusive(built: Path, capsys) -> None:
+    """--canonical must parse to canonicalise, so the flag cannot be honoured."""
+    code, _, err = run(capsys, "ref", str(built), "--canonical", "--no-validate")
     assert code == EXIT_ERROR
+    assert "--no-validate cannot apply" in err
 
 
-def test_hashing_a_fifo_fails_rather_than_blocking(tmp_path: Path) -> None:
-    """Same guard for payload files, which `verify` reads."""
-    from chirograph.hashing import hash_file
+def test_json_output_keeps_a_non_utf8_filename_recoverable(tmp_path: Path, capsys) -> None:
+    """The escape must round-trip back to the real filename.
 
-    fifo = tmp_path / "pipe.dat"
+    An earlier version rewrote surrogates to a literal-backslash spelling to satisfy
+    RFC 8259; the result could not be turned back into a path, so a consumer could
+    not act on the report, and two distinct files collapsed to one string.
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "a.txt").write_bytes(b"listed\n")
+    target = tmp_path / "m.chiro.json"
+    assert run(capsys, "write", str(root), "-o", str(target))[0] == EXIT_OK
     try:
-        os.mkfifo(fifo)
-    except (AttributeError, OSError):  # pragma: no cover
-        pytest.skip("cannot create a FIFO here")
-    with pytest.raises(OSError, match="not a regular file"):
-        hash_file(fifo)
+        with open(bytes(root) + b"/stray\xff.dat", "wb") as handle:
+            handle.write(b"x\n")
+    except OSError:  # pragma: no cover
+        pytest.skip("filesystem will not create a non-UTF-8 filename")
+
+    code, out, _ = run(
+        capsys, "verify", str(target), "--root", str(root), "--check-extra", "--json"
+    )
+    assert code == EXIT_OK
+    names = json.loads(out)["extra_files"]
+    assert len(names) == 1
+    # The decisive property: the reported name locates the actual file.
+    assert (root / names[0]).exists(), names

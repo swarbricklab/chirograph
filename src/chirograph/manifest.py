@@ -659,9 +659,15 @@ class Manifest:
     def loads(cls, text: str | bytes, **kwargs: Any) -> Manifest:
         if isinstance(text, (bytes, bytearray)):
             text = decode_document(bytes(text))
+        # `ValueError` rather than `json.JSONDecodeError`, plus `RecursionError`:
+        # json.loads raises a plain ValueError for an integer past the 4300-digit
+        # conversion limit and RecursionError for a deeply-nested array. Both are
+        # properties of the document, so both are SchemaErrors — and translating
+        # them here means every command gets it, rather than each one growing its
+        # own handler and `chiro ref` printing a raw traceback.
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as exc:
+        except (ValueError, RecursionError) as exc:
             raise SchemaError(f"manifest is not valid JSON: {exc}") from exc
         return cls.from_dict(data, **kwargs)
 
@@ -700,24 +706,27 @@ _BOMS: tuple[tuple[bytes, str], ...] = (
 
 
 def read_manifest_bytes(path: str | os.PathLike[str]) -> bytes:
-    """Read a manifest file, refusing anything that is not a regular file.
+    """Read a manifest file, refusing a directory.
 
-    The check happens *before* opening, because opening a FIFO blocks until a writer
-    appears — in CI that is a hung job rather than a failed one, which is far worse
-    than an error. A directory, socket or device is equally not a manifest.
+    Deliberately does **not** refuse pipes, character devices or FIFOs. An earlier
+    version did, to stop a writerless FIFO blocking forever — but that broke the two
+    idioms for checking a manifest you never wrote to disk::
 
-    Lives here rather than in each command so that every read path gets it: the
-    check was originally added to ``chiro validate`` alone, and `verify`, `info`,
-    `ls`, `ref`, `dvc-dir`, `remap` and `diff` all still hung.
+        chiro validate <(curl -s https://…/GSE1.chiro.json)
+        curl -s https://…/GSE1.chiro.json | chiro validate /dev/stdin
+
+    Process substitution *is* a FIFO, so there is no guard that stops the hang and
+    keeps those working. Between the two, keeping them wins: pointing any tool at a
+    writerless FIFO blocks (``cat``, ``jq`` and ``md5sum`` all do), so the behaviour
+    is unsurprising and explicitly requested by the path the user typed — whereas
+    losing the streaming form removes a capability a registry's CI actually wants.
+
+    A directory is still refused, because that never blocks and the message is
+    better than ``IsADirectoryError`` from deep inside a read.
     """
     target = Path(path)
     if target.is_dir():
-        raise OSError(f"{target} is a directory, not a manifest")
-    # `exists()` follows symlinks, so a link to a FIFO is caught too. A broken
-    # symlink falls through to `read_bytes` and raises FileNotFoundError, which is
-    # the right message.
-    if target.exists() and not target.is_file():
-        raise OSError(f"{target} is not a regular file")
+        raise IsADirectoryError(f"{target} is a directory, not a manifest")
     return target.read_bytes()
 
 
@@ -788,14 +797,25 @@ def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     exactly the combination of a non-NFC path and a forward-compatible unknown
     field.
     """
-    # No type-checking loop here: `FileEntry.__post_init__` validates paths on
-    # construction, so by the time an entry reaches this function its `relpath` is
-    # a validated NFC string. An earlier version checked types here as well; that
-    # branch became unreachable through any public API the moment the constructor
-    # started validating, and only a subclass that disables __post_init__ could
-    # reach it. Two fixes collided and this was the redundant one.
+    # `FileEntry.__post_init__` validates paths, so a real FileEntry always arrives
+    # with a validated NFC `relpath` and this loop is redundant for it. It is not
+    # redundant in general: this function and `Manifest.with_files` are both public
+    # and annotated `Sequence[FileEntry]`, so a duck-typed object (a
+    # `SimpleNamespace`, a test double) reaches `nfc()` directly — and a bare
+    # `TypeError` from inside `unicodedata.normalize` is not a `ChirographError`, so
+    # a caller's `except` misses it and the message names neither the entry nor the
+    # field. An earlier commit removed this on the mistaken grounds that only a
+    # subclass could reach it.
     normalised: list[FileEntry] = []
-    for entry in files:
+    for index, entry in enumerate(files):
+        for name in ("relpath", "source_path"):
+            value = getattr(entry, name, None)
+            if name == "source_path" and value is None:
+                continue
+            if not isinstance(value, str):
+                raise SchemaError(
+                    f"files[{index}]: {name!r} must be a string, got {type(value).__name__}"
+                )
         relpath = nfc(entry.relpath)
         source_path = None if entry.source_path is None else nfc(entry.source_path)
         if relpath != entry.relpath or source_path != entry.source_path:

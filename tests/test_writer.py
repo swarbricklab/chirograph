@@ -342,25 +342,41 @@ def test_nfd_filename_produces_a_note(tree: Path) -> None:
     assert nfd not in [e.relpath for e in result.manifest.files]
 
 
-def test_unrepresentable_only_directory_is_not_reported_empty(tmp_path: Path) -> None:
-    """It holds a file we declined to list, which is not the same as being empty.
+def test_empty_dirs_treats_every_skip_reason_alike(tmp_path: Path) -> None:
+    """`empty_dirs` is defined by *materialisation*, not by what is on disk.
 
-    Only matters for a library caller acting on the walk report, but "expect nothing
-    here" is the wrong thing to tell one.
+    D-11: the format cannot represent an empty directory, so it vanishes on
+    checkout — and a directory whose only file was skipped for *any* reason does
+    vanish. An earlier commit special-cased the unrepresentable case alone, which
+    left the field meaning neither "empty in the manifest" nor "empty on disk".
     """
     root = tmp_path / "tree"
-    (root / "onlybad").mkdir(parents=True)
+    for name in ("only_unrep", "only_hidden", "only_excluded", "truly_empty"):
+        (root / name).mkdir(parents=True)
     (root / "ok.txt").write_bytes(b"x\n")
+    (root / "only_hidden" / ".hidden").write_bytes(b"x\n")
+    (root / "only_excluded" / "skip.tmp").write_bytes(b"x\n")
     try:
-        with open(bytes(root / "onlybad") + b"/\xff.dat", "wb") as handle:
+        with open(bytes(root / "only_unrep") + b"/\xff.dat", "wb") as handle:
             handle.write(b"x\n")
     except OSError:  # pragma: no cover
         pytest.skip("filesystem will not create a non-UTF-8 filename")
 
-    report = walk_tree(root, skip_unrepresentable=True)
+    report = walk_tree(
+        root,
+        excludes=[*DEFAULT_EXCLUDES, "*.tmp"],
+        include_hidden=False,
+        skip_unrepresentable=True,
+    )
     assert report.paths == ["ok.txt"]
-    assert len(report.unrepresentable) == 1
-    assert "onlybad" not in report.empty_dirs
+    assert report.unrepresentable == ["only_unrep/\udcff.dat"]
+    # All four are equally invisible after materialisation, so all four are listed.
+    assert set(report.empty_dirs) == {
+        "only_unrep",
+        "only_hidden",
+        "only_excluded",
+        "truly_empty",
+    }
 
 
 def test_skip_unrepresentable_covers_more_than_surrogates(tmp_path: Path) -> None:

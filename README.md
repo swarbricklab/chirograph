@@ -83,6 +83,13 @@ chiro capture ./deposit --source-url ... -o later.chiro.json
 chiro diff GSE000000.chiro.json later.chiro.json
 ```
 
+A manifest never written to disk can be checked by streaming it:
+
+```bash
+curl -sL https://example.org/GSE000000.chiro.json | chiro validate /dev/stdin
+chiro validate <(curl -sL https://example.org/GSE000000.chiro.json)
+```
+
 `chiro --help` lists the rest: `info`, `ls`, `ref`, `remap`, `dvc-dir`, `schema`,
 `test-vectors`.
 

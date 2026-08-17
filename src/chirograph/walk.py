@@ -260,10 +260,13 @@ def walk_tree(
                 if skip_unrepresentable:
                     report.skipped.append((child_rel, f"not representable in a manifest ({exc})"))
                     report.unrepresentable.append(child_rel)
-                    # The directory is not empty — it holds a file we declined to
-                    # list. Saying otherwise would tell a library caller to expect
-                    # nothing here.
-                    found_here = True
+                    # Deliberately does NOT set `found_here`. `empty_dirs` is defined
+                    # by *materialisation* — the format cannot represent an empty
+                    # directory, so it vanishes on checkout (D-11) — and a directory
+                    # whose only file is unlistable does vanish. Setting it would also
+                    # single out one of five skip reasons (excluded, hidden,
+                    # unreadable, special-file, unrepresentable), leaving the field
+                    # meaning neither "empty in the manifest" nor "empty on disk".
                     continue
                 # Name the file. A filename whose bytes are not valid UTF-8 (which
                 # Python surfaces as surrogates) is the realistic case here, and

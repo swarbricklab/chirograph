@@ -32,6 +32,8 @@ it** where that is not obvious.
 | [D-17](#d-17) | Derived fields are computed, never stored on the object | new |
 | [D-18](#d-18) | Digests must be lowercase hex; no silent lower-casing | review finding |
 | [D-19](#d-19) | A 1.x minor may only add **scalar** fields | format constraint |
+| [D-20](#d-20) | Special files are read, not refused; a writerless FIFO blocks | review reversal |
+| [D-21](#d-21) | Non-UTF-8 filenames stay recoverable in `--json`, not portable | review reversal |
 
 ---
 
@@ -562,6 +564,72 @@ version, where readers are expected to fail loudly rather than tolerate.
 
 ---
 
+## D-20 — Special files are read, not refused. A writerless FIFO blocks, and that is accepted. {#d-20}
+
+A reversal of my own earlier fix, forced by review.
+
+`chiro validate` on a named FIFO with no writer blocks forever, which in CI is a
+hung job rather than a failed one. I "fixed" that by refusing anything that is not
+a regular file. That broke the two idioms for checking a manifest you never wrote
+to disk:
+
+```bash
+chiro validate <(curl -s https://…/GSE1.chiro.json)
+curl -s https://…/GSE1.chiro.json | chiro validate /dev/stdin
+```
+
+Process substitution *is* a FIFO, so **no guard stops the hang and keeps those
+working**. The choice is between them.
+
+**Decision.** Keep the streaming forms. A directory is still refused (it never
+blocks, and the message beats an `IsADirectoryError` from inside a read); nothing
+else is.
+
+**Why.** Pointing any Unix tool at a writerless FIFO blocks — `cat`, `jq` and
+`md5sum` all do — so the behaviour is unsurprising and is explicitly requested by
+the path the user typed. Losing the streaming form removes a capability a
+registry's CI actually wants, in exchange for defending against a foot-gun that
+every other tool shares. The first version of this reasoning was wrong because I
+only considered the hang, not what the guard cost.
+
+**If it ever needs solving properly:** open non-blocking and `select` with a short
+timeout, so a FIFO with a live writer works and a dead one errors. Real complexity
+for a rare case; not worth it yet.
+
+---
+
+## D-21 — A non-UTF-8 filename stays *recoverable* in `--json`, at the cost of interoperability. {#d-21}
+
+Also a reversal of my own fix.
+
+A path whose bytes are not valid UTF-8 reaches us as unpaired surrogates (Python's
+`surrogateescape`), and gets emitted as a `\uDCxx` escape. That is syntactically
+valid JSON and round-trips losslessly in Python, but RFC 8259 §8.2 marks unpaired
+surrogates as not interoperable: Go's `encoding/json` substitutes U+FFFD and
+`serde_json` rejects them. I rewrote them to a literal-backslash spelling to fix
+that.
+
+Review showed the cure was worse in two ways:
+
+1. **The result could no longer be turned back into a filename**, so a consumer
+   could not act on the report — and naming a file precisely is the report's entire
+   purpose.
+2. **Two distinct files collapsed to one string.** A directory holding a file with
+   an invalid byte *and* a file literally named with those six characters produced
+   identical output, so a consumer that deduplicates saw one extra file where two
+   existed.
+
+**Decision.** Revert. Emit the lossless escape, document that such entries are not
+portable, and tell consumers in other languages to treat them as opaque.
+
+**Where this actually needs solving:** the registry's drift-report format
+(registry design §7b), which is the thing that will cross language boundaries. It
+should carry the raw bytes in a dedicated, explicitly-encoded field — percent-
+encoded or base64 — rather than trying to squeeze them into a JSON string. Recorded
+in [`ideas.md`](ideas.md) §2.1.
+
+---
+
 ## Follow-ups
 
 What needs your eye, in priority order:
@@ -713,9 +781,13 @@ before and after. It did find seven defects of a different kind, all fixed:
   valid JSON.
 - **Two fixes in one commit collided.** Adding validation to `__post_init__` made
   the `normalise_order` type-check — the fix the *same* commit advertised —
-  unreachable through any public API, and changed the user-visible error from the
-  intended `SchemaError` to `PathSafetyError`. The dead branch is removed and the
-  test that needed a subclass hack to reach it now asserts what actually holds.
+  redundant for any real `FileEntry`, and changed the user-visible error from the
+  intended `SchemaError` to `PathSafetyError`. **I then removed the check on the
+  mistaken grounds that only a subclass could reach it; a later pass showed a
+  duck-typed object reaches it through two *public* functions**
+  (`normalise_order` and `Manifest.with_files`), where a bare `TypeError` from
+  `unicodedata.normalize` is not a `ChirographError` and names neither the entry nor
+  the field. The check is back.
 - **`__post_init__`'s docstring contradicted its own code** six lines later,
   claiming digest length was not checked when it is. Corrected, and the
   per-construction `set()` build hoisted to a module constant.
@@ -734,6 +806,37 @@ before and after. It did find seven defects of a different kind, all fixed:
 Also confirmed by that pass: nothing is O(n²), and BOM-less UTF-16 input now fails
 at the JSON parse where it previously *loaded* — closing a hole the commit had not
 even claimed.
+
+### Found by reviewing the fixes-for-fixes-for-fixes
+
+A fourth pass found eight findings, **three of them regressions from the third
+round**, which is why the rounds kept going. Two became decisions
+([D-20](#d-20), [D-21](#d-21)); the rest:
+
+- **A real TOCTOU in `chiro ref`.** Making it validate meant `Manifest.load(path)`
+  and then `ChiroRef.for_path(path)` — two opens. Swapping the file between them
+  was demonstrated to mint a `chiro://` address for content that was never
+  validated, at exit 0, in the one command whose entire job is producing the address
+  a registry keys on. It now reads the bytes **once**, validates *those bytes*, and
+  hashes *those bytes*. Same fix in `chiro validate`, which was also reading twice —
+  and whose second read was outside the per-manifest handler, so it could abort a
+  batch.
+- **`ref --check` was conflating two questions.** `--check REF` asks "did I fetch
+  the right manifest?", which is byte identity. Validating on that path reported
+  failure for a byte-perfect download of a manifest that merely had a finding, gave
+  it the same exit code as a genuine byte mismatch, and emitted nothing at all on
+  `--json`. It no longer validates; `chiro validate` answers the other question.
+- **`ref` leaked raw tracebacks** on pathological JSON (deep nesting →
+  `RecursionError`, a 5000-digit integer → plain `ValueError`) — in the very commit
+  that added handling for both to `validate`. Fixed once in `Manifest.loads`, so
+  every command gets it rather than each growing its own handler.
+- **`--canonical --no-validate` was accepted and silently ignored** (canonicalising
+  requires a parse). Now an explicit usage error.
+
+Cost note the pass also surfaced: `chiro ref` on an 18 MB manifest goes from 0.5 s
+to 10 s because validating means parsing. That is the price of not minting addresses
+for non-manifests; `--no-validate` restores the fast path when the caller already
+knows.
 
 The first review also cleared several areas, which is worth recording: no accepted path escapes the import target (fullwidth and division
 solidus, `....//`, percent-encoded traversal, overlong components and bidi
