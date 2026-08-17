@@ -82,7 +82,7 @@ of a drift report), `chiro ref` (`chiro://` syntax + registry shard path),
 
 ### Verification status
 
-490 tests, 92% statement coverage; `ruff` and `mypy --strict` clean; conformance
+511 tests, 92% statement coverage; `ruff` and `mypy --strict` clean; conformance
 vectors 68/68 and independently re-derived with coreutils. Also checked from a
 clean zero-dependency wheel install and on the Python 3.10 floor. Notably:
 
@@ -97,10 +97,12 @@ clean zero-dependency wheel install and on the Python 3.10 floor. Notably:
 reproduce every finding before reporting it. They found **41 defects**, all fixed
 with regression tests — including a TOCTOU in `chiro ref`, `fetch_plan()` returning
 non-URLs for `geo://` and `s3://` (the spec's own examples), `chiro remap` silently
-destroying paths, and a `chiro validate` that accepted a UTF-16 manifest. Rounds 1–4
-each introduced regressions that the next round caught — twice in the very function
-just rewritten — which is the clearest evidence in this repo that a passing test suite
-is not the same thing as correct code. The findings, including the
+destroying paths, and a `chiro validate` that accepted a UTF-16 manifest. Rounds 1–4 each
+introduced regressions that the next round caught, **twice in the very function just
+rewritten** — the clearest evidence in this repo that a passing test suite is not the
+same thing as correct code. That second repeat prompted a different response than
+another review: `chiro ref`'s flag combinations are now enumerated as a test matrix,
+verified to fail (6 cases) when the regression is deliberately reintroduced. The findings, including the
 several places where a review disproved a claim in my own commit messages, are in
 [`decisions.md`](decisions.md).
 

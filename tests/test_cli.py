@@ -1023,3 +1023,104 @@ def test_ref_errors_name_the_file(built: Path, tmp_path: Path, capsys) -> None:
         code, _, err = run(capsys, command, str(broken))
         assert code == EXIT_FINDING
         assert "trunc.chiro.json" in err, command
+
+
+# --------------------------------------------------------------------------- #
+# `chiro ref` flag matrix
+# --------------------------------------------------------------------------- #
+#
+# Two review rounds found a regression in `cmd_ref` immediately after it was
+# rewritten, both times a flag being silently ignored on one branch. Reviewing the
+# function again would not stop a third; enumerating the combinations does.
+
+
+REF_FLAG_MATRIX = [
+    ([], "whole-file"),
+    (["--shard"], "whole-file"),
+    (["--json"], "whole-file"),
+    (["--no-validate"], "whole-file"),
+    (["--shard", "--json"], "whole-file"),
+    (["--canonical"], "canonical"),
+    (["--canonical", "--shard"], "canonical"),
+    (["--canonical", "--json"], "canonical"),
+]
+
+
+def reference_from(out: str, flags: list[str]) -> str:
+    """Pull the reference out of whichever output shape the flags asked for."""
+    if "--json" in flags:
+        return str(json.loads(out)["reference"])
+    return out.splitlines()[0]
+
+
+@pytest.mark.parametrize("flags,which", REF_FLAG_MATRIX, ids=lambda v: "+".join(v) if v else "bare")
+def test_ref_flag_matrix_addresses_the_right_thing(
+    built: Path, capsys, flags: list[str], which: str
+) -> None:
+    """Every combination must report the address its flags imply.
+
+    `--canonical` selects the reformat-invariant address; everything else the
+    whole-file one. A flag being ignored on one branch is exactly how this function
+    broke twice.
+    """
+    whole = run(capsys, "ref", str(built))[1].splitlines()[0]
+    canonical = run(capsys, "ref", str(built), "--canonical")[1].splitlines()[0]
+    assert whole != canonical
+
+    code, out, _ = run(capsys, "ref", str(built), *flags)
+    assert code == EXIT_OK
+    expected = canonical if which == "canonical" else whole
+    assert reference_from(out, flags) == expected, (flags, out)
+
+
+@pytest.mark.parametrize("flags,which", REF_FLAG_MATRIX, ids=lambda v: "+".join(v) if v else "bare")
+def test_ref_shard_is_honoured_wherever_it_is_accepted(
+    built: Path, capsys, flags: list[str], which: str
+) -> None:
+    code, out, _ = run(capsys, "ref", str(built), *flags)
+    assert code == EXIT_OK
+    digest = reference_from(out, flags).removeprefix("chiro://md5:")
+    shard = f"manifests/{digest[:2]}/{digest[2:]}.chiro.json"
+    if "--json" in flags:
+        assert json.loads(out)["shard_path"] == shard
+    elif "--shard" in flags:
+        assert out.splitlines()[1] == shard
+    else:
+        assert len(out.splitlines()) == 1  # nothing extra printed
+
+
+@pytest.mark.parametrize("flags", [[], ["--canonical"]], ids=["whole-file", "canonical"])
+def test_ref_check_agrees_with_ref_for_the_same_flags(
+    built: Path, capsys, flags: list[str]
+) -> None:
+    """`--check` must compare the address the *same* flags would have produced."""
+    own = run(capsys, "ref", str(built), *flags)[1].splitlines()[0]
+    other_flags = ["--canonical"] if not flags else []
+    other = run(capsys, "ref", str(built), *other_flags)[1].splitlines()[0]
+
+    assert run(capsys, "ref", str(built), *flags, "--check", own)[0] == EXIT_OK
+    assert run(capsys, "ref", str(built), *flags, "--check", other)[0] == EXIT_FINDING
+    # ...and --json reports the same verdict on both paths.
+    code, out, _ = run(capsys, "ref", str(built), *flags, "--check", own, "--json")
+    assert code == EXIT_OK
+    assert json.loads(out)["ok"] is True
+
+
+@pytest.mark.parametrize("algorithm", ["md5", "sha256"])
+def test_ref_algorithm_is_honoured_on_every_path(built: Path, capsys, algorithm: str) -> None:
+    lengths = {"md5": 32, "sha256": 64}
+    for flags in ([], ["--canonical"], ["--no-validate"]):
+        if "--no-validate" in flags and algorithm == "sha256":
+            pass  # still valid: the algorithm applies to the whole-file hash
+        code, out, _ = run(capsys, "ref", str(built), "--algorithm", algorithm, *flags)
+        assert code == EXIT_OK, flags
+        reference = out.splitlines()[0]
+        assert reference.startswith(f"chiro://{algorithm}:"), (flags, reference)
+        assert len(reference.split(":")[-1]) == lengths[algorithm]
+
+
+def test_ref_rejects_a_malformed_check_argument(built: Path, capsys) -> None:
+    for bad in ("not-a-ref", "chiro://md5:xyz", "md5:" + "0" * 32, "chiro://" + "0" * 32):
+        code, _, err = run(capsys, "ref", str(built), "--check", bad)
+        assert code == EXIT_ERROR, bad
+        assert "RefError" in err or "malformed" in err
