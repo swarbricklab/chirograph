@@ -169,8 +169,25 @@ the equivalence *derived* rather than baked into the format.
 ### 4.3 A large-tree performance test
 Everything is tested on trees of three files. The realistic case is 10⁴–10⁶ files
 and terabytes. A generated large tree (sparse files, so it costs no disk) would
-catch the O(n²) mistakes that do not show up at n=3 — and would tell us where
-spec §10's JSON-Lines threshold actually lies rather than guessing >~10⁵.
+catch the O(n²) mistakes that do not show up at n=3, and belongs in CI as a
+guard rather than as a one-off measurement.
+
+A one-off measurement was taken (in-memory, CPython 3.11, quadrupling n from 1000
+to 64000) and everything scales **linearly** — canonicalisation, `Manifest`
+construction, lint, serialisation and load all show ≈4× per 4× n, nothing
+quadratic. At n = 64 000 the whole round trip is ≈7 s, of which the JSON *load*
+is ≈3.7 s and dominates.
+
+That extrapolates to roughly 6 s of parse time at 10⁵ entries — which suggests
+spec §10's ">~10⁵ files" threshold for the JSON-Lines variant is about right, and
+that when it starts to hurt it will be **parse** time, not our canonicalisation.
+Worth re-measuring on a real deposit before acting on it.
+
+Two O(n²) traps to be aware of, both currently avoided but neither enforced:
+`Manifest.entry()` is a linear scan, and `Manifest.by_relpath` rebuilds its dict
+on every access. Calling either inside a loop over entries would be quadratic. All
+current callers hoist them; a large-tree test in CI is what would catch a future
+one that does not.
 
 ### 4.4 Fuzz the reader
 The reader is a security boundary: it parses untrusted third-party manifests and

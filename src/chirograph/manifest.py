@@ -308,7 +308,12 @@ class Manifest:
         return iter(self.files)
 
     def entry(self, relpath: str) -> FileEntry | None:
-        """Look up an entry by workspace path (NFC-normalised)."""
+        """Look up an entry by workspace path (NFC-normalised).
+
+        A linear scan, which is right for the one-off lookup this is for. Looking
+        up many paths against a large manifest should hoist :attr:`by_relpath`
+        instead — calling this in a loop over the entries is quadratic.
+        """
         target = validate_path(relpath)
         for candidate in self.files:
             if candidate.relpath == target:
@@ -317,7 +322,12 @@ class Manifest:
 
     @property
     def by_relpath(self) -> dict[str, FileEntry]:
-        """Index for callers doing many lookups."""
+        """Index for callers doing many lookups.
+
+        Builds a fresh dict on every access — deliberately, since ``files`` is
+        mutable and a cached index could go stale — so bind it to a local once
+        rather than touching the property inside a loop.
+        """
         return {entry.relpath: entry for entry in self.files}
 
     # -- consumer helpers --------------------------------------------------- #
