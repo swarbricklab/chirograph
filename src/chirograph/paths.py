@@ -95,6 +95,23 @@ def validate_path(path: object, *, field: str = "relpath") -> str:
             f"{field} must be relative; looks like a Windows drive path: {path!r}"
         )
 
+    # Surrogates cannot be UTF-8 encoded, so a path containing one cannot go into
+    # a manifest at all. They arrive two ways: a JSON document containing a
+    # "\udcff" escape (pure ASCII on the wire, so no transport rejects it), and —
+    # far more commonly — from the filesystem, where Python decodes a filename
+    # that is not valid UTF-8 using surrogateescape. A latin-1-named file in a
+    # deposit is entirely routine. Checking here converts what would otherwise be
+    # a bare UnicodeEncodeError escaping every `except ChirographError` into a
+    # normal, catchable rejection that names the field.
+    surrogates = sorted(c for c in set(path) if "\ud800" <= c <= "\udfff")
+    if surrogates:
+        codes = ", ".join(f"U+{ord(c):04X}" for c in surrogates)
+        raise PathSafetyError(
+            f"{field} contains unpaired surrogate(s) {codes} and so cannot be encoded as "
+            f"UTF-8: {path!r}. On a filesystem this means the filename's bytes are not "
+            f"valid UTF-8; rename the file, because no JSON manifest can represent it."
+        )
+
     encoded = path.encode("utf-8")
     if len(encoded) > MAX_PATH_BYTES:
         raise PathSafetyError(
@@ -208,17 +225,42 @@ def lint_paths(paths: Iterable[str]) -> list[PathWarning]:
 def join_source_url(source_url: str, source: str) -> str:
     """Resolve one entry's fetch URL from ``source_url`` and its source path.
 
-    Implements spec §9 "Resolving a fetch location", with one correction the
-    spec glosses over: :func:`urllib.parse.urljoin` treats a base without a
-    trailing slash as naming a *file*, and discards its last segment. So
-    ``urljoin("https://x/suppl", "a.gz")`` yields ``https://x/a.gz`` — silently
-    wrong, and wrong in a way that only shows up as a 404 much later. We append
-    the slash, because ``source_url`` is documented as a *base* location
-    (spec §3.1) and is therefore always directory-like.
-    """
-    from urllib.parse import quote, urljoin
+    Implements spec §9 "Resolving a fetch location". Deliberately does **not** use
+    :func:`urllib.parse.urljoin`, which gets this wrong in three separate ways
+    for the URLs this format actually carries:
 
-    base = source_url if source_url.endswith("/") else source_url + "/"
-    # Percent-encode the path segment but leave already-safe characters alone.
-    # '/' is safe because `source` is a multi-component relative path.
-    return urljoin(base, quote(source, safe="/~"))
+    1. **Non-hierarchical schemes lose the base entirely.** ``urljoin`` only
+       resolves relative references for schemes in
+       :data:`urllib.parse.uses_relative`; for anything else it returns the
+       reference unchanged. So ``urljoin("geo://GSE12345/", "a.gz")`` yields
+       ``"a.gz"`` — not a URL at all. ``geo://`` is the spec's own §3.2 example
+       and ``s3://`` is named in §3.2 and §6.1, so this is the common case, not
+       an edge one.
+    2. **A base without a trailing slash loses its last segment**, because
+       ``urljoin`` reads it as naming a file: ``urljoin("https://x/suppl",
+       "a.gz")`` → ``https://x/a.gz``.
+    3. **A base with a query or fragment loses its path.** Appending a slash to
+       ``https://h/files?dataset=X`` appends it to the *query*, so ``urljoin``
+       then strips ``/files``.
+
+    So the join is done explicitly on the path component: the base path is made
+    directory-like, the source is appended to it, and the scheme, netloc, query
+    and fragment are carried through untouched. A query is treated as a parameter
+    of the request rather than part of the location, which is the only reading
+    that keeps an API-style base usable.
+
+    *source* is validated first, because this is exported as the spec §9 helper
+    and a caller may reach it without going through a manifest.
+    """
+    from urllib.parse import quote, urlsplit, urlunsplit
+
+    validate_path(source, field="source")
+    parts = urlsplit(source_url)
+    base_path = parts.path
+    if not base_path.endswith("/"):
+        base_path += "/"
+    # '/' stays unescaped because `source` is a multi-component relative path;
+    # everything else that is legal in a filename but significant in a URL
+    # (space, '#', '?', '%') is encoded.
+    joined = base_path + quote(source, safe="/~")
+    return urlunsplit((parts.scheme, parts.netloc, joined, parts.query, parts.fragment))

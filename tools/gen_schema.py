@@ -31,6 +31,8 @@ PATH_PATTERN = (
 
 TIMESTAMP_PATTERN = r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$"
 
+# Lowercase only, per docs/decisions.md D-18: canonicalisation hashes the array as
+# given, so accepting either case would give one manifest two body_hash values.
 HEX_ANY = r"^([0-9a-f]{32}|[0-9a-f]{64})$"
 HEX_MD5 = r"^[0-9a-f]{32}$"
 HEX_SHA256 = r"^[0-9a-f]{64}$"
@@ -65,8 +67,9 @@ ENTRY = {
             "pattern": HEX_ANY,
             "description": (
                 "Hash of the file's bytes, per the manifest's hash_algorithm. Named "
-                "'md5' for DVC .dir alignment even when the algorithm is sha256; the "
-                "exact length is constrained by hash_algorithm in the allOf below."
+                "'md5' for DVC .dir alignment even when the algorithm is sha256. Lowercase "
+                "hexadecimal only (docs/decisions.md D-18); the exact length is constrained "
+                "by hash_algorithm in the allOf below."
             ),
         },
         "size": {"type": "integer", "minimum": 0, "description": "File size in bytes."},

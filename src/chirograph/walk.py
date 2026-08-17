@@ -17,7 +17,7 @@ from fnmatch import fnmatch
 from itertools import pairwise
 from pathlib import Path
 
-from .errors import ChirographError
+from .errors import ChirographError, PathSafetyError
 from .paths import nfc, validate_path
 
 __all__ = [
@@ -235,7 +235,14 @@ def walk_tree(
             normalised = nfc(child_rel)
             if normalised != child_rel:
                 report.renormalised.append(child_rel)
-            validate_path(normalised)
+            try:
+                validate_path(normalised)
+            except PathSafetyError as exc:
+                # Name the file. A filename whose bytes are not valid UTF-8 (which
+                # Python surfaces as surrogates) is the realistic case here, and
+                # "cannot encode" with no path attached is unactionable when the
+                # tree has ten thousand files in it.
+                raise PathSafetyError(f"{base / child_rel}: {exc}") from exc
             pairs.append((normalised, child_rel))
             found_here = True
 

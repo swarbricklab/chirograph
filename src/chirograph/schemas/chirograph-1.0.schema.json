@@ -102,7 +102,7 @@
           "md5": {
             "type": "string",
             "pattern": "^([0-9a-f]{32}|[0-9a-f]{64})$",
-            "description": "Hash of the file's bytes, per the manifest's hash_algorithm. Named 'md5' for DVC .dir alignment even when the algorithm is sha256; the exact length is constrained by hash_algorithm in the allOf below."
+            "description": "Hash of the file's bytes, per the manifest's hash_algorithm. Named 'md5' for DVC .dir alignment even when the algorithm is sha256. Lowercase hexadecimal only (docs/decisions.md D-18); the exact length is constrained by hash_algorithm in the allOf below."
           },
           "size": {
             "type": "integer",

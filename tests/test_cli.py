@@ -278,13 +278,40 @@ def test_validate_reports_lint_warnings(tmp_path: Path, capsys) -> None:
 
 
 def test_validate_multiple_and_json(built: Path, tmp_path: Path, capsys) -> None:
+    """Malformed JSON is a *finding* about the document, not a tool failure.
+
+    `chiro verify` already exited 1 for the same file. The two commands
+    disagreeing would make a CI gate's behaviour depend on which one it called
+    (docs/decisions.md D-16).
+    """
     broken = tmp_path / "broken.chiro.json"
     broken.write_text("{not json")
     code, out, _ = run(capsys, "validate", str(built), str(broken), "--json")
-    assert code == EXIT_ERROR
+    assert code == EXIT_FINDING
     payload = json.loads(out)
     assert payload["ok"] is False
     assert len(payload["manifests"]) == 2
+    # The good manifest must still be reported, not lost to the bad one.
+    assert payload["manifests"][0]["ok"] is True
+
+
+def test_validate_unreadable_file_is_a_tool_error(tmp_path: Path, capsys) -> None:
+    code, _, _ = run(capsys, "validate", str(tmp_path / "nope.chiro.json"))
+    assert code == EXIT_ERROR
+
+
+def test_validate_and_verify_agree_on_a_bom(built: Path, tmp_path: Path, capsys) -> None:
+    """Both must call it a finding, and both must mention the BOM."""
+    bommed = tmp_path / "bom.chiro.json"
+    bommed.write_bytes(b"\xef\xbb\xbf" + built.read_bytes())
+
+    code, out, _ = run(capsys, "validate", str(bommed))
+    assert code == EXIT_FINDING
+    assert "BOM" in out
+
+    code, _, err = run(capsys, "verify", str(bommed))
+    assert code == EXIT_FINDING
+    assert "BOM" in err
 
 
 # --------------------------------------------------------------------------- #
@@ -540,3 +567,143 @@ def test_full_deposit_workflow(tmp_path: Path, capsys) -> None:
 
     # 7. The old manifest is still valid — nothing was destroyed.
     assert run(capsys, "validate", str(manifest_path))[0] == EXIT_OK
+
+
+# --------------------------------------------------------------------------- #
+# Regressions from the adversarial review
+# --------------------------------------------------------------------------- #
+
+
+def three_entry_manifest(tmp_path: Path) -> Path:
+    """One relocated entry, one redundant source_path, one terse."""
+    from chirograph.manifest import FileEntry
+
+    manifest = Manifest(
+        source_url="https://ftp.example.org/geo/GSE1/suppl/",
+        created="2026-01-01T00:00:00Z",
+        files=[
+            FileEntry("sampleA/matrix.mtx", "1" * 32, 10, source_path="GSE1_sampleA_matrix.mtx"),
+            FileEntry("readme.txt", "2" * 32, 20, source_path="readme.txt"),
+            FileEntry("other.bin", "3" * 32, 30),
+        ],
+    )
+    return manifest.dump(tmp_path / "in.chiro.json")
+
+
+def layout_of(path: Path) -> list[tuple[str, str | None]]:
+    return [
+        (entry["relpath"], entry.get("source_path"))
+        for entry in json.loads(path.read_text())["files"]
+    ]
+
+
+def test_remap_leaves_entries_alone_when_no_rule_matches(tmp_path: Path, capsys) -> None:
+    """The destructive case: relpath was being overwritten with source_path.
+
+    `apply_rules` returns its input when nothing matches, and remap assigned that
+    unconditionally — so a non-matching rule silently replaced every entry's
+    workspace layout with its deposit layout.
+    """
+    source = three_entry_manifest(tmp_path)
+    before = layout_of(source)
+
+    target = tmp_path / "out.chiro.json"
+    code, _, err = run(
+        capsys, "remap", str(source), "--relpath-from-source", r"^ZZZ_(.*)$=>\1", "-o", str(target)
+    )
+    assert code == EXIT_OK
+    assert layout_of(target) == before
+    assert "matched no rule" in err
+
+
+def test_remap_does_not_delete_source_paths_when_no_rule_matches(tmp_path: Path, capsys) -> None:
+    """The mirror case: losing source_path means losing the fetch location."""
+    source = three_entry_manifest(tmp_path)
+    before = layout_of(source)
+
+    target = tmp_path / "out.chiro.json"
+    code, _, _ = run(
+        capsys, "remap", str(source), "--source-from-relpath", r"^ZZZ_(.*)$=>\1", "-o", str(target)
+    )
+    assert code == EXIT_OK
+    assert layout_of(target) == before
+
+
+def test_remap_still_rewrites_the_entries_that_do_match(tmp_path: Path, capsys) -> None:
+    source = three_entry_manifest(tmp_path)
+    target = tmp_path / "out.chiro.json"
+    code, _, err = run(
+        capsys,
+        "remap",
+        str(source),
+        "--relpath-from-source",
+        r"^GSE1_([^_]+)_(.*)$=>reorg/\1/\2",
+        "-o",
+        str(target),
+    )
+    assert code == EXIT_OK
+    assert ("reorg/sampleA/matrix.mtx", "GSE1_sampleA_matrix.mtx") in layout_of(target)
+    # ...and only those entries.
+    assert ("readme.txt", "readme.txt") in layout_of(target)
+    assert ("other.bin", None) in layout_of(target)
+    assert "2 of 3" in err
+
+
+def test_stdout_still_reports_notes_and_warnings(tree: Path, capsys) -> None:
+    """`chiro write … --stdout > m.chiro.json` must not swallow diagnostics.
+
+    They go to stderr, which cannot contaminate the piped manifest.
+    """
+    (tree / "empty_dir").mkdir()
+    (tree / "NUL.txt").write_bytes(b"x")
+    code, out, err = run(capsys, "write", str(tree), "--stdout")
+    assert code == EXIT_OK
+    assert json.loads(out)["schema"] == "chirograph"  # stdout is still pure JSON
+    assert "warning:" in err
+    assert "windows-reserved" in err
+
+
+def test_surrogate_filename_names_the_file_and_is_a_finding(tmp_path: Path, capsys) -> None:
+    """A latin-1 filename is routine in real deposits, and used to crash."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "ok.txt").write_bytes(b"hello\n")
+    bad = bytes(root) + b"/caf\xe9.txt"
+    try:
+        with open(bad, "wb") as handle:
+            handle.write(b"x\n")
+    except OSError:  # pragma: no cover - filesystem refuses the name
+        pytest.skip("filesystem will not create a non-UTF-8 filename")
+
+    code, _, err = run(capsys, "write", str(root), "--stdout")
+    assert code == EXIT_FINDING
+    assert "surrogate" in err
+    assert "caf" in err  # the offending file is named
+
+
+def test_validate_batch_survives_one_bad_manifest(built: Path, tmp_path: Path, capsys) -> None:
+    """A surrogate used to abort the loop before anything was reported."""
+    from chirograph.canonical import compute_body_hash
+
+    files = [{"relpath": "a\udcffb", "md5": "b1946ac92492d2347c6235b4d2611184", "size": 6}]
+    bad = tmp_path / "surr.chiro.json"
+    bad.write_text(
+        json.dumps(
+            {
+                "schema": "chirograph",
+                "schema_version": "1.0",
+                "hash_algorithm": "md5",
+                "provenance_type": "self-deposited",
+                "created": "2026-01-01T00:00:00Z",
+                "size": 6,
+                "nfiles": 1,
+                "body_hash": "0" * 32,
+                "files": files,
+            }
+        )
+    )
+    assert compute_body_hash  # imported for the reader's benefit
+    code, out, _ = run(capsys, "validate", str(built), str(bad))
+    assert code == EXIT_FINDING
+    assert out.startswith("OK ")  # the good one is reported first, not lost
+    assert "INVALID" in out

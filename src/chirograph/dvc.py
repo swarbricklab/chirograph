@@ -41,8 +41,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .constants import DEFAULT_HASH_ALGORITHM, PROVENANCE_SELF
-from .errors import DvcError
+from .constants import HASH_ALGORITHMS, PROVENANCE_SELF
+from .errors import DvcError, SchemaError
+from .hashing import check_digest
 from .manifest import FileEntry, Manifest
 from .paths import validate_path
 from .timestamps import now_timestamp
@@ -280,8 +281,10 @@ def manifest_from_dvc(
     provenance_type: str = PROVENANCE_SELF,
     source_url: str | None = None,
     record_accession: str | None = None,
+    created: str | None = None,
     retrieved: str | None = None,
     generator: str | None = None,
+    hash_algorithm: str | None = None,
     allow_legacy_md5: bool = False,
     prefer_workspace_sizes: bool = False,
 ) -> DvcTranscription:
@@ -289,6 +292,11 @@ def manifest_from_dvc(
 
     *out_path* selects one output when the file describes several (a ``dvc.lock``
     typically does).
+
+    *hash_algorithm*, if given, must agree with the algorithm the ``.dvc`` records.
+    Transcription copies DVC's digests verbatim; it cannot convert between
+    algorithms without reading the data, which is the one thing this function
+    exists to avoid.
     """
     target = Path(dvc_file)
     outs = read_dvc_file(target)
@@ -319,6 +327,28 @@ def manifest_from_dvc(
             f"pass --allow-legacy-md5 if you know every file is binary."
         )
 
+    # The algorithm comes from the `.dvc`, not from a default. DVC can record
+    # sha256 (and other) hashes, and hard-coding md5 here produced manifests whose
+    # header said md5 over 64-character digests — written at exit 0, then rejected
+    # by our own reader. `md5-dos2unix` reaching here means --allow-legacy-md5 was
+    # passed, and those digests are md5-shaped.
+    recorded = _PLAIN if out.hash_name == _LEGACY else out.hash_name
+    if recorded not in HASH_ALGORITHMS:
+        supported = ", ".join(sorted(HASH_ALGORITHMS))
+        raise DvcError(
+            f"{target}: output {out.path!r} records {out.hash_name!r} hashes, which this "
+            f"format does not support ({supported}). Cloud remotes using etags cannot be "
+            f"transcribed — the digest is not a function of content alone "
+            f"(docs/decisions.md D-04)."
+        )
+    if hash_algorithm is not None and hash_algorithm != recorded:
+        raise DvcError(
+            f"{target} records {recorded} hashes, so a {hash_algorithm} manifest cannot be "
+            f"transcribed from it — that would need re-reading the data, which is the whole "
+            f"cost `--from-dvc-cache` exists to avoid. Drop --hash-algorithm, or build the "
+            f"manifest from the directory instead."
+        )
+
     dvc_root = find_dvc_root(target.resolve().parent)
     if dvc_root is None:
         raise DvcError(
@@ -342,6 +372,15 @@ def manifest_from_dvc(
         )
     notes.extend(more)
 
+    # Validate the transcribed digests against the algorithm rather than trusting
+    # the `.dvc`, and fail here with the file named. Emitting a manifest that our
+    # own `chiro validate` rejects is worse than refusing to write one.
+    for entry in entries:
+        try:
+            check_digest(entry.md5, recorded, field=f"{entry.relpath} digest")
+        except SchemaError as exc:
+            raise DvcError(f"{target}: {exc}") from exc
+
     if out.nfiles is not None and out.nfiles != len(entries):
         notes.append(
             f"{target.name} declares nfiles={out.nfiles} but the .dir lists {len(entries)} "
@@ -354,13 +393,17 @@ def manifest_from_dvc(
             f"One of them is stale — verify with `chiro verify` before relying on this manifest."
         )
 
+    # `created` goes through the constructor rather than being assigned afterwards,
+    # so it gets the same timestamp validation as every other path into a Manifest
+    # (docs/decisions.md D-05). Assigning past __post_init__ let `--created
+    # not-a-timestamp` produce an unloadable manifest at exit 0.
     manifest = Manifest(
         provenance_type=provenance_type,
         files=entries,
-        hash_algorithm=DEFAULT_HASH_ALGORITHM,
+        hash_algorithm=recorded,
         source_url=source_url,
         record_accession=record_accession,
-        created=now_timestamp(),
+        created=created or now_timestamp(),
         retrieved=retrieved,
         generator=generator if generator is not None else GENERATOR,
     )

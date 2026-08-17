@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from .errors import ChirographError
 from .paths import validate_path
 
-__all__ = ["RewriteRule", "apply_rules", "parse_rules"]
+__all__ = ["RewriteRule", "apply_rules", "parse_rules", "try_apply_rules"]
 
 SEPARATOR = "=>"
 
@@ -81,8 +81,10 @@ def parse_rules(specs: Iterable[str] | None) -> tuple[RewriteRule, ...]:
     return tuple(RewriteRule.parse(spec) for spec in (specs or ()))
 
 
-def apply_rules(rules: Sequence[RewriteRule], path: str, *, field: str = "relpath") -> str:
-    """Apply the first matching rule to *path*.
+def try_apply_rules(
+    rules: Sequence[RewriteRule], path: str, *, field: str = "relpath"
+) -> str | None:
+    """Apply the first matching rule to *path*, or return ``None`` if none match.
 
     First-match-wins, not sequential application. Chained substitutions are
     almost never what someone writing two rules for two different filename
@@ -92,6 +94,12 @@ def apply_rules(rules: Sequence[RewriteRule], path: str, *, field: str = "relpat
     The result is validated as a manifest path, so a rule that produces
     ``../escape`` or an absolute path fails at write time rather than at some
     consumer's checkout.
+
+    The ``None`` return matters: a caller that is *deriving* one path from another
+    must be able to tell "no rule applied" from "a rule applied and returned the
+    input unchanged". Conflating them lets a non-matching rule overwrite the
+    entry's other path with this one — silent data loss. :func:`apply_rules` is
+    the convenience wrapper for callers where returning the input is correct.
     """
     for rule in rules:
         if rule.applies_to(path):
@@ -102,4 +110,15 @@ def apply_rules(rules: Sequence[RewriteRule], path: str, *, field: str = "relpat
                     f"{path!r} to the empty string"
                 )
             return validate_path(rewritten, field=field)
-    return path
+    return None
+
+
+def apply_rules(rules: Sequence[RewriteRule], path: str, *, field: str = "relpath") -> str:
+    """Apply the first matching rule to *path*, returning *path* if none match.
+
+    Correct where the input is already the value being kept — the writer's walked
+    path is both candidates before any rule runs. Where one path is being
+    *derived* from another, use :func:`try_apply_rules` and check for ``None``.
+    """
+    result = try_apply_rules(rules, path, field=field)
+    return path if result is None else result

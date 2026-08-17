@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .constants import (
+    DEFAULT_HASH_ALGORITHM,
     HASH_ALGORITHMS,
     PROVENANCE_OBSERVED,
     PROVENANCE_SELF,
@@ -62,6 +63,35 @@ def human_bytes(count: int) -> str:
 def emit_json(payload: object, stream: TextIO) -> None:
     json.dump(payload, stream, indent=2, ensure_ascii=False, default=str)
     stream.write("\n")
+
+
+class _SurrogateSafeStream:
+    """A stream proxy that survives text containing unpaired surrogates.
+
+    Filenames whose bytes are not valid UTF-8 come back from the filesystem as
+    surrogates, and they end up *inside error messages* — which is exactly when
+    you most want the message. Writing one to a strict UTF-8 stream raises
+    ``UnicodeEncodeError``, so reporting the problem crashed on the problem.
+
+    Wrapping the CLI's two streams once covers every call site, including ones
+    added later, and is why commands take ``out``/``err`` as parameters rather than
+    touching :data:`sys.stdout` directly.
+    """
+
+    __slots__ = ("_stream",)
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        try:
+            return self._stream.write(text)
+        except UnicodeEncodeError:
+            # backslashreplace keeps the filename legible and copy-pasteable.
+            return self._stream.write(text.encode("utf-8", "backslashreplace").decode("utf-8"))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
 
 
 class _Progress:
@@ -158,8 +188,13 @@ def _add_header_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--hash-algorithm",
         choices=sorted(HASH_ALGORITHMS),
-        default="md5",
-        help="hash algorithm (default md5, which keeps DVC .dir interop)",
+        default=None,
+        help=(
+            "hash algorithm (default md5, which keeps DVC .dir interop). Defaults to "
+            "None internally so that 'not given' is distinguishable from an explicit "
+            "'md5' — --from-dvc-cache must not reject a sha256 .dvc for disagreeing "
+            "with a value the user never typed."
+        ),
     )
 
 
@@ -296,7 +331,7 @@ def _add_capture(subparsers: Any) -> None:
     parser.add_argument("--created", metavar="TS", help="override created")
     parser.add_argument("--generator", metavar="STR", help="override the generator string")
     parser.add_argument(
-        "--hash-algorithm", choices=sorted(HASH_ALGORITHMS), default="md5", help="hash algorithm"
+        "--hash-algorithm", choices=sorted(HASH_ALGORITHMS), default=None, help="hash algorithm"
     )
     _add_walk_flags(parser)
     _add_output_flags(parser)
@@ -551,19 +586,27 @@ def _write_output(manifest: Manifest, args: argparse.Namespace, out: TextIO) -> 
 
 
 def _report_build(result: Any, target: Path | None, args: argparse.Namespace, err: TextIO) -> None:
+    """Write the build summary and every diagnostic to stderr.
+
+    Under ``--stdout`` the informational summary is dropped but **notes and lint
+    warnings are not**. They go to stderr, which cannot contaminate the manifest on
+    stdout, and suppressing them meant that `chiro write … --stdout > m.chiro.json`
+    — the obvious idiom — silently discarded things like "the .dvc's declared size
+    disagrees with the recovered sizes; one of them is stale".
+    """
     manifest = result.manifest
-    if args.stdout:
-        return
-    lines = [
-        f"{manifest.nfiles} file(s), {human_bytes(manifest.size)}",
-        f"body_hash {manifest.hash_algorithm}:{manifest.body_hash}",
-    ]
-    if target is not None:
-        reference = ChiroRef.for_path(target, manifest.hash_algorithm)
-        lines.insert(0, f"wrote {target}")
-        lines.append(f"reference {reference}")
-    elif args.dry_run:
-        lines.insert(0, "dry run: nothing written")
+    lines: list[str] = []
+    if not args.stdout:
+        lines += [
+            f"{manifest.nfiles} file(s), {human_bytes(manifest.size)}",
+            f"body_hash {manifest.hash_algorithm}:{manifest.body_hash}",
+        ]
+        if target is not None:
+            reference = ChiroRef.for_path(target, manifest.hash_algorithm)
+            lines.insert(0, f"wrote {target}")
+            lines.append(f"reference {reference}")
+        elif args.dry_run:
+            lines.insert(0, "dry run: nothing written")
     for note in getattr(result, "notes", []):
         lines.append(f"note: {note}")
     for finding in manifest.lint():
@@ -571,7 +614,8 @@ def _report_build(result: Any, target: Path | None, args: argparse.Namespace, er
     walk = getattr(result, "walk", None)
     if walk is not None and walk.skipped:
         lines.append(f"skipped {len(walk.skipped)} entry/entries (use --json for detail)")
-    err.write("\n".join(lines) + "\n")
+    if lines:
+        err.write("\n".join(lines) + "\n")
 
 
 def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
@@ -589,13 +633,16 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             provenance_type=args.provenance,
             source_url=args.source_url,
             record_accession=args.accession,
+            created=args.created,
             retrieved=args.retrieved,
             generator=args.generator,
+            # Only forward an explicitly-chosen algorithm. The parser's default is
+            # md5, and forwarding that would reject every sha256 .dvc for
+            # disagreeing with a value the user never typed.
+            hash_algorithm=args.hash_algorithm,
             allow_legacy_md5=args.allow_legacy_md5,
             prefer_workspace_sizes=args.prefer_workspace_sizes,
         )
-        if args.created:
-            result.manifest.created = args.created
         result.notes.insert(
             0,
             f"transcribed {result.out.path!r} from {args.from_dvc_cache} without rehashing; "
@@ -611,7 +658,7 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     built = build_from_directory(
         args.directory,
         provenance_type=args.provenance,
-        hash_algorithm=args.hash_algorithm,
+        hash_algorithm=args.hash_algorithm or DEFAULT_HASH_ALGORITHM,
         source_url=args.source_url,
         record_accession=args.accession,
         created=args.created,
@@ -640,7 +687,7 @@ def cmd_capture(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         args.directory,
         source_url=args.source_url,
         retrieved=args.retrieved,
-        hash_algorithm=args.hash_algorithm,
+        hash_algorithm=args.hash_algorithm or DEFAULT_HASH_ALGORITHM,
         record_accession=args.accession,
         created=args.created,
         generator=args.generator,
@@ -729,12 +776,36 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     for name in args.manifest:
         entry: dict[str, object] = {"path": name}
         try:
-            raw = Path(name).read_text(encoding="utf-8")
-            document = json.loads(raw)
-        except (OSError, json.JSONDecodeError) as exc:
-            entry.update(ok=False, errors=[f"unreadable or not JSON: {exc}"])
+            raw = Path(name).read_bytes()
+        except OSError as exc:
+            # Cannot read the file: a tool failure, not a verdict on the manifest.
+            entry.update(ok=False, errors=[f"unreadable: {exc}"])
             reports.append(entry)
             worst = max(worst, EXIT_ERROR)
+            continue
+
+        # A BOM and malformed JSON are *findings* about the document, not tool
+        # failures — `chiro verify` already treated them that way, and the two
+        # commands disagreeing on the exit code for the same file would make a CI
+        # gate's behaviour depend on which one it happened to call.
+        if raw.startswith(b"\xef\xbb\xbf"):
+            entry.update(
+                ok=False,
+                errors=[
+                    "SchemaError: manifest starts with a UTF-8 BOM; spec §1.2 requires "
+                    "UTF-8 with no BOM (a BOM also changes the whole-file hash, and so "
+                    "the chiro:// reference)"
+                ],
+            )
+            reports.append(entry)
+            worst = max(worst, EXIT_FINDING)
+            continue
+        try:
+            document = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            entry.update(ok=False, errors=[f"SchemaError: not valid JSON: {exc}"])
+            reports.append(entry)
+            worst = max(worst, EXIT_FINDING)
             continue
 
         errors: list[str] = []
@@ -915,7 +986,7 @@ def cmd_ref(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 
 def cmd_remap(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     from .manifest import FileEntry
-    from .rewrite import apply_rules
+    from .rewrite import try_apply_rules
 
     manifest = Manifest.load(args.manifest)
     to_relpath = parse_rules(args.relpath_from_source)
@@ -925,18 +996,29 @@ def cmd_remap(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         return EXIT_ERROR
 
     entries: list[FileEntry] = []
+    untouched = 0
     for entry in manifest.files:
         relpath, source_path = entry.relpath, entry.source_path
+        # `try_apply_rules` returns None when no rule matched, and that distinction
+        # is load-bearing here. Treating "no match" as "returned the input" would
+        # overwrite relpath with source_path (or delete source_path) for every
+        # entry the rules do not cover — silently replacing the workspace layout
+        # with the deposit layout, or losing the fetch location entirely.
+        rewritten = False
         if to_relpath:
-            source_path = entry.source
-            relpath = apply_rules(to_relpath, source_path, field="relpath")
+            candidate = try_apply_rules(to_relpath, entry.source, field="relpath")
+            if candidate is not None:
+                relpath, source_path, rewritten = candidate, entry.source, True
         elif to_source:
-            source_path = apply_rules(to_source, entry.relpath, field="source_path")
+            candidate = try_apply_rules(to_source, entry.relpath, field="source_path")
+            if candidate is not None:
+                source_path, rewritten = candidate, True
+        if not rewritten and (to_relpath or to_source):
+            untouched += 1
         # Drop a source_path that says nothing, keeping the terse form terse
-        # (spec §3.2). Only when asked, or when a rule just produced it: silently
-        # tidying an untouched manifest would change its body_hash (D-06).
-        redundant = source_path == relpath
-        if redundant and (args.tidy or to_relpath or to_source):
+        # (spec §3.2). Only when asked, or when a rule just rewrote this entry:
+        # silently tidying an entry nothing touched would change body_hash (D-06).
+        if source_path == relpath and (args.tidy or rewritten):
             source_path = None
         entries.append(
             FileEntry(
@@ -967,8 +1049,16 @@ def cmd_remap(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             f"body_hash {manifest.body_hash} -> {updated.body_hash}\n"
             f"the chiro:// reference changes with it; the per-file hashes do not.\n"
         )
-        for finding in updated.lint():
-            err.write(f"warning: {finding}\n")
+    # Warnings and the untouched count go to stderr regardless of --stdout: they
+    # cannot contaminate a piped manifest, and suppressing them is how a silent
+    # no-op gets mistaken for a successful rewrite.
+    if untouched:
+        err.write(
+            f"note: {untouched} of {len(entries)} entry/entries matched no rule and were "
+            f"left unchanged\n"
+        )
+    for finding in updated.lint():
+        err.write(f"warning: {finding}\n")
     return EXIT_OK
 
 
@@ -1031,10 +1121,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return EXIT_ERROR
 
+    # Wrapped once here, so no individual command has to think about it.
+    out: TextIO = _SurrogateSafeStream(sys.stdout)  # type: ignore[assignment]
+    err: TextIO = _SurrogateSafeStream(sys.stderr)  # type: ignore[assignment]
+
     try:
-        return int(args.func(args, sys.stdout, sys.stderr))
+        return int(args.func(args, out, err))
     except ChirographError as exc:
-        sys.stderr.write(f"{PROGRAM}: {type(exc).__name__}: {exc}\n")
+        err.write(f"{PROGRAM}: {type(exc).__name__}: {exc}\n")
         # A manifest that does not match its bytes or its own hashes is a
         # *finding*, not a tool failure — CI wants to tell those apart.
         from .errors import IntegrityError, ManifestError
@@ -1043,13 +1137,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EXIT_FINDING
         return EXIT_ERROR
     except FileNotFoundError as exc:
-        sys.stderr.write(f"{PROGRAM}: {exc.strerror}: {exc.filename}\n")
+        err.write(f"{PROGRAM}: {exc.strerror}: {exc.filename}\n")
         return EXIT_ERROR
     except (OSError, ValueError) as exc:
-        sys.stderr.write(f"{PROGRAM}: {exc}\n")
+        err.write(f"{PROGRAM}: {exc}\n")
         return EXIT_ERROR
     except KeyboardInterrupt:  # pragma: no cover
-        sys.stderr.write("\ninterrupted\n")
+        err.write("\ninterrupted\n")
         return 130
     except BrokenPipeError:  # pragma: no cover - `chiro ls | head`
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())

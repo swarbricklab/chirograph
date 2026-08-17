@@ -270,3 +270,96 @@ def test_dvc_lock_with_several_outputs_requires_selection(tmp_path: Path) -> Non
 def test_dvc_out_selection_names_available_options(dvc_repo: Path) -> None:
     with pytest.raises(DvcError, match="Available: data"):
         manifest_from_dvc(dvc_repo / "data.dvc", out_path="nope")
+
+
+# --------------------------------------------------------------------------- #
+# Regressions from the adversarial review
+# --------------------------------------------------------------------------- #
+
+
+def write_dvc(path: Path, body: str) -> Path:
+    """A hand-written .dvc, for shapes a real `dvc add` will not produce."""
+    (path.parent / ".dvc" / "cache" / "files" / "md5").mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    return path
+
+
+def test_sha256_dvc_produces_a_sha256_manifest(tmp_path: Path) -> None:
+    """It used to hard-code md5, emitting 64-char digests under an md5 header.
+
+    Written at exit 0, then rejected by our own reader — the worst of both.
+    """
+    from chirograph.manifest import Manifest
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "data").mkdir()
+    (repo / "data" / "a.txt").write_bytes(b"test\n")
+    dvc_file = write_dvc(
+        repo / "sha.dvc",
+        "outs:\n"
+        "- sha256: 2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806\n"
+        "  size: 5\n"
+        "  hash: sha256\n"
+        "  path: data/a.txt\n",
+    )
+    result = manifest_from_dvc(dvc_file)
+    assert result.manifest.hash_algorithm == "sha256"
+    # The round trip our own validator performs.
+    Manifest.loads(result.manifest.to_json())
+
+
+def test_non_hex_digest_is_refused_rather_than_written(tmp_path: Path) -> None:
+    """An etag-shaped digest sailed through and produced an unloadable manifest."""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "data").mkdir()
+    (repo / "data" / "a.txt").write_bytes(b"test\n")
+    dvc_file = write_dvc(
+        repo / "etag.dvc",
+        "outs:\n"
+        "- md5: d41d8cd98f00b204e9800998ecf8427e-3\n"
+        "  size: 5\n"
+        "  hash: md5\n"
+        "  path: data/a.txt\n",
+    )
+    with pytest.raises(DvcError, match="34 characters"):
+        manifest_from_dvc(dvc_file)
+
+
+def test_unsupported_hash_name_is_refused_with_an_explanation(tmp_path: Path) -> None:
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "data").mkdir()
+    (repo / "data" / "a.txt").write_bytes(b"test\n")
+    dvc_file = write_dvc(
+        repo / "etagname.dvc",
+        "outs:\n"
+        "- md5: d8e8fca2dc0f896fd7cb4cb0031ba249\n"
+        "  size: 5\n"
+        "  hash: etag\n"
+        "  path: data/a.txt\n",
+    )
+    with pytest.raises(DvcError, match="etag"):
+        manifest_from_dvc(dvc_file)
+
+
+def test_created_goes_through_timestamp_validation(dvc_repo: Path) -> None:
+    """Assigning it after construction bypassed __post_init__ (D-05)."""
+    from chirograph.errors import SchemaError
+
+    with pytest.raises(SchemaError, match="ISO-8601"):
+        manifest_from_dvc(dvc_repo / "data.dvc", created="not-a-timestamp")
+    with pytest.raises(SchemaError, match="timezone offset"):
+        manifest_from_dvc(dvc_repo / "data.dvc", created="2026-01-01T00:00:00")
+
+    result = manifest_from_dvc(dvc_repo / "data.dvc", created="2026-01-01T00:00:00Z")
+    assert result.manifest.created == "2026-01-01T00:00:00Z"
+
+
+def test_conflicting_hash_algorithm_is_refused(dvc_repo: Path) -> None:
+    """Transcription cannot convert algorithms without reading the data."""
+    with pytest.raises(DvcError, match="cannot be transcribed"):
+        manifest_from_dvc(dvc_repo / "data.dvc", hash_algorithm="sha256")
+    # Agreeing is fine.
+    assert manifest_from_dvc(dvc_repo / "data.dvc", hash_algorithm="md5").manifest

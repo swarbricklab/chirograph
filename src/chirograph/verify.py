@@ -246,19 +246,25 @@ def verify_body(manifest: Manifest, declared_body_hash: str | None = None) -> bo
     return recomputed == (declared_body_hash or manifest.body_hash)
 
 
-def _resolve_on_disk(target: Path) -> Path:
-    """Fall back to the NFD spelling of a path when the NFC one is absent.
+def _resolve_on_disk(root: Path, relative: str) -> Path:
+    """Fall back to the NFD spelling of *relative* when the NFC one is absent.
 
     Manifest paths are NFC (spec §3.2), but a checkout on macOS materialises NFD
     filenames, so opening the manifest's own spelling raises
     ``FileNotFoundError`` for every accented name. Reporting all of them as
     "missing" would be technically true and completely unhelpful.
+
+    Only the *relative* part is decomposed. Decomposing the joined path would also
+    rewrite the root, which the manifest says nothing about and which the user
+    typed — so a perfectly present file under a root like ``réf_root/`` would be
+    looked for under a decomposed root that does not exist, and reported missing.
     """
+    target = root / relative
     if target.exists():
         return target
-    decomposed = unicodedata.normalize("NFD", str(target))
-    if decomposed != str(target):
-        candidate = Path(decomposed)
+    decomposed = unicodedata.normalize("NFD", relative)
+    if decomposed != relative:
+        candidate = root / decomposed
         if candidate.exists():
             return candidate
     return target
@@ -268,14 +274,24 @@ def verify_entry(
     entry: FileEntry,
     path: str | os.PathLike[str],
     algorithm: str = "md5",
+    *,
+    root: str | os.PathLike[str] | None = None,
 ) -> FileResult:
     """Check one file's bytes against one entry.
 
     Size is compared first because it is a free ``stat`` and catches truncated
     or plainly-wrong files without reading gigabytes to reach the same
     conclusion.
+
+    *root*, when given, enables the NFD fallback for macOS-style checkouts: *path*
+    is then interpreted as ``root`` joined with a manifest-relative path, and only
+    the relative part is re-spelled. Without it, *path* is used exactly as given.
     """
-    target = _resolve_on_disk(Path(path))
+    if root is not None:
+        base = Path(root)
+        target = _resolve_on_disk(base, str(Path(path).relative_to(base)))
+    else:
+        target = Path(path)
     try:
         info = target.stat()
     except FileNotFoundError:
@@ -370,11 +386,13 @@ def verify_tree(
     workers = jobs if jobs is not None else default_jobs()
     workers = max(1, min(workers, max(1, total)))
 
+    def check(entry: FileEntry) -> FileResult:
+        # `root=base` turns on the NFD fallback for the manifest-relative part only.
+        return verify_entry(entry, base / relative(entry), manifest.hash_algorithm, root=base)
+
     if workers == 1 or total <= 1:
         for entry in selected:
-            results[entry.relpath] = verify_entry(
-                entry, base / relative(entry), manifest.hash_algorithm
-            )
+            results[entry.relpath] = check(entry)
             completed += 1
             if progress:
                 progress(completed, total)
@@ -382,12 +400,7 @@ def verify_tree(
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(
-                    verify_entry, entry, base / relative(entry), manifest.hash_algorithm
-                ): entry
-                for entry in selected
-            }
+            futures = {pool.submit(check, entry): entry for entry in selected}
             for future in as_completed(futures):
                 entry = futures[future]
                 results[entry.relpath] = future.result()

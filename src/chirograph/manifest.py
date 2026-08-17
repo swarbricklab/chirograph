@@ -42,7 +42,7 @@ from .errors import (
     UnsupportedVersion,
 )
 from .hashing import check_algorithm, check_digest
-from .paths import join_source_url, lint_paths, validate_path
+from .paths import join_source_url, lint_paths, nfc, validate_path
 from .timestamps import canonical_timestamp, now_timestamp
 
 __all__ = [
@@ -133,6 +133,9 @@ class FileEntry:
     def relocated(self) -> bool:
         """True when the deposit layout differs from the workspace layout."""
         return self.source_path is not None and self.source_path != self.relpath
+
+    def __post_init__(self) -> None:
+        _reject_shadowing(self.extra, _KNOWN_ENTRY_FIELDS, where="a file entry")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise in the format's field order, omitting absent fields."""
@@ -263,6 +266,7 @@ class Manifest:
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        _reject_shadowing(self.extra, _KNOWN_HEADER_FIELDS, where="a manifest header")
         check_algorithm(self.hash_algorithm)
         if self.provenance_type not in PROVENANCE_TYPES:
             raise SchemaError(
@@ -589,9 +593,12 @@ class Manifest:
                 )
 
         if check_body_hash:
-            declared = data["body_hash"]
+            # Validated with the same rule as every other digest, so an uppercase
+            # body_hash is reported as "must be lowercase" rather than as a
+            # mismatch blaming corruption (docs/decisions.md D-18).
+            declared = check_digest(data["body_hash"], algorithm, field="body_hash")
             recomputed = manifest.body_hash
-            if not isinstance(declared, str) or declared.lower() != recomputed:
+            if declared != recomputed:
                 raise BodyHashMismatch(
                     f"body_hash mismatch: manifest declares {declared!r}, recomputed "
                     f"{recomputed!r} over the canonicalised files array. The file list has "
@@ -637,23 +644,53 @@ class Manifest:
         return f"{safe or 'manifest'}{MANIFEST_SUFFIX}"
 
 
+def _reject_shadowing(extra: Mapping[str, Any], known: frozenset[str], *, where: str) -> None:
+    """Refuse ``extra`` keys that collide with a real field name.
+
+    ``extra`` is written out after the known fields, so a colliding key would
+    override the value the object computed — letting ``extra={"relpath": "../x"}``
+    emit a path that never saw :func:`validate_path`, or
+    ``extra={"body_hash": ...}`` emit a body_hash that is not a hash of the body.
+    Unreachable through :meth:`Manifest.from_dict` (which excludes known keys from
+    ``extra``), but this is the documented public object model, so the guard
+    belongs on the constructor rather than in the loader.
+    """
+    collisions = sorted(set(extra) & known)
+    if collisions:
+        raise SchemaError(
+            f"{where} has extra field(s) {', '.join(collisions)} that collide with real "
+            f"field names. Extra fields are serialised after the known ones, so these "
+            f"would silently override validated values."
+        )
+
+
 def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     """Sort entries into canonical order and reject duplicate ``relpath``.
 
     Delegates to :func:`chirograph.canonical.normalise_entries` so that the
     ordering used on disk is provably the same one used for hashing, rather than
     a second sort that could drift from it.
+
+    Entries handed in directly may carry non-NFC paths, so they are normalised
+    here — by :func:`dataclasses.replace` on the entry, never by reconstructing a
+    ``FileEntry`` from the canonicalised row. The row is a flattened mapping that
+    includes any ``extra`` fields, so ``FileEntry(**row)`` raised ``TypeError`` for
+    exactly the combination of a non-NFC path and a forward-compatible unknown
+    field.
     """
-    ordered = normalise_entries([entry.to_dict() for entry in files])
-    index = {entry.relpath: entry for entry in files}
-    # `normalise_entries` NFC-normalises; entries built through FileEntry are
-    # already normalised, but entries handed in directly may not be.
-    result: list[FileEntry] = []
-    for row in ordered:
-        relpath = str(row["relpath"])
-        existing = index.get(relpath)
-        result.append(existing if existing is not None else FileEntry(**row))
-    return result
+    normalised: list[FileEntry] = []
+    for entry in files:
+        relpath = nfc(entry.relpath)
+        source_path = None if entry.source_path is None else nfc(entry.source_path)
+        if relpath != entry.relpath or source_path != entry.source_path:
+            entry = replace(entry, relpath=relpath, source_path=source_path)
+        normalised.append(entry)
+
+    # Ordering and duplicate rejection stay in canonical.py, so the on-disk order
+    # is provably the order that gets hashed.
+    ordered = normalise_entries([entry.to_dict() for entry in normalised])
+    index = {entry.relpath: entry for entry in normalised}
+    return [index[str(row["relpath"])] for row in ordered]
 
 
 def _parse_version(value: object) -> tuple[int, int]:

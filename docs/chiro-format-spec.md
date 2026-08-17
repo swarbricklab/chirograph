@@ -151,7 +151,7 @@ that matter.
 | Field | Req? | Type | Meaning / who acts on it |
 |---|---|---|---|
 | `schema` | **yes** | string | Constant `"chirograph"`. Fallback identifier if the filename is mangled; validators key on it. |
-| `schema_version` | **yes** | string | Format version (`"1.0"`). Lets future parsers handle old files. |
+| `schema_version` | **yes** | string | Format version (`"1.0"`). Lets future parsers handle old files. *(v0.3)* A reader MUST reject a differing **major**. A higher **minor** is additive: unknown fields are tolerated and preserved. Consequently a minor version MAY only add **scalar** fields — a nested value has no canonical form under §4, so tolerating one would create exactly the silent divergence §4 exists to prevent. See [`decisions.md`](decisions.md) D-07, D-19. |
 | `hash_algorithm` | **yes** | string | Algorithm for `body_hash` and every `files[].md5`. `"md5"` (default, DVC-aligned) or `"sha256"`. A consumer MUST read this to verify anything. *(frozen v0.3)* `"etag"` is **reserved but not valid** at `schema_version` 1.0 — an ETag is not a function of content alone, so it can neither address content nor be checked against bytes; see §6.1 and [`decisions.md`](decisions.md) D-04. |
 | `provenance_type` | **yes** | string | `"self-deposited"` or `"observed-download"`. Governs trust semantics (§5). |
 | `record_accession` | opt | string | Deposition accession/ID this manifest describes (EGA `EGAD…`, GEO `GSE…`, BIA `…`). Cross-linking; lets a backend confirm it has the right manifest. |
@@ -161,7 +161,7 @@ that matter.
 | `generator` | opt | string | Tool + version that wrote the file. Aids *our* debugging; not consumer-actionable, kept separate. |
 | `size` | **yes** | integer | Sum of all `files[].size`, bytes. (DVC `.dvc` top-level `size`.) Cheap sanity check; used by `dvc list`-style views. |
 | `nfiles` | **yes** | integer | Count of entries in `files` (recursive file count). (DVC `.dvc` top-level `nfiles`.) |
-| `body_hash` | **yes** | string | Hash (per `hash_algorithm`) of the canonicalised `files` array (§4). Enables standalone integrity checking. *(corrected v0.3)* This is **not** the DVC `.dir` hash under any circumstances — see the errata note and §4. |
+| `body_hash` | **yes** | string | Hash (per `hash_algorithm`) of the canonicalised `files` array (§4), lowercase hex. Enables standalone integrity checking. *(corrected v0.3)* This is **not** the DVC `.dir` hash under any circumstances — see the errata note and §4. |
 
 \* `opt*` = optional in schema but **required by convention** for the stated
 `provenance_type`; a validator SHOULD warn if missing for `observed-download`.
@@ -179,7 +179,7 @@ distinction, made explicit:
 | Field | Req? | Type | Meaning |
 |---|---|---|---|
 | `relpath` | **yes** | string | **Workspace path** — where the file is materialised on `pull`/`checkout`, relative to the import target. POSIX-separated, relative, no leading `/`, no `.`/`..`. This is the file's identity within the manifest and the primary sort key. Matches DVC `.dir` semantics exactly. |
-| `md5` | **yes** | string | Hash of the file's bytes, per `hash_algorithm`. |
+| `md5` | **yes** | string | Hash of the file's bytes, per `hash_algorithm`. *(v0.3)* **Lowercase** hexadecimal, exactly `hash_algorithm`'s digest length. Case is mandated rather than normalised on read, because canonicalisation hashes the array as given (§4) — accepting either case would give one manifest two `body_hash` values. See [`decisions.md`](decisions.md) D-18. |
 | `size` | **yes** | integer | File size in bytes. |
 | `source_path` | opt | string | **Deposit/source path** — where to *fetch* the bytes from, relative to `source_url`. Present only when the deposit layout differs from the workspace layout. **If omitted, `source_path == relpath`.** |
 | `isexec` | opt | bool | DVC-compat: execute bit. Rarely meaningful for scientific data; omit by default. Reserved so ingesting a DVC `.dir` with `isexec` doesn't collide. |
@@ -478,13 +478,24 @@ fetch_url = urljoin(base, percent_encode(source))
 place_at  = import_target / f.relpath
 ```
 
-*(added v0.3)* The trailing slash is load-bearing and easy to get wrong.
-`urljoin` treats a base without one as naming a *file* and discards its last
-segment, so `urljoin("https://x/suppl", "a.gz")` yields `https://x/a.gz` — silently
-wrong, and only visible as a 404 much later. `source_url` is documented as a *base*
-location (§3.1) and is therefore always directory-like, so normalise it. Paths must
-also be percent-encoded: spaces and `#` are legal in filenames (§3.2) and
-significant in URLs.
+*(added v0.3)* **Do not use `urljoin` for this.** It is wrong here in three
+separate ways, and two of them affect the repositories this format is aimed at:
+
+1. **Non-hierarchical schemes lose the base entirely.** `urljoin` only resolves
+   relative references for schemes in `urllib.parse.uses_relative`; for anything
+   else it returns the reference unchanged. So `urljoin("geo://GSE12345/", "a.gz")`
+   is `"a.gz"` — not a URL at all. `geo://` is §3.2's own example and `s3://`
+   appears in §3.2 and §6.1, so this is the common case.
+2. **A base without a trailing slash loses its last segment**, because `urljoin`
+   reads it as naming a file: `urljoin("https://x/suppl", "a.gz")` →
+   `https://x/a.gz`, silently wrong and only visible as a 404 much later.
+3. **A base with a query or fragment loses its path**, because appending the
+   trailing slash appends it to the *query*.
+
+Join on the path component instead, carrying scheme, authority, query and fragment
+through untouched, and treat a query as a parameter of the request rather than part
+of the location. Paths must also be percent-encoded: spaces and `#` are legal in
+filenames (§3.2) and significant in URLs.
 
 The reference implementation exposes this as `Manifest.fetch_plan()`, which returns
 `(source, relpath, md5, size, url)` per entry — the intended integration point for

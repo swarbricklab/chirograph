@@ -72,10 +72,16 @@ def _check_scalar(key: str, value: Any, *, where: str) -> Any:
     ``None`` is rejected rather than treated as absent: the format expresses
     "no value" by omitting the key, and accepting both spellings would give two
     canonical forms for one manifest. ``float`` is rejected because ``1.0`` and
-    ``1`` are the same number but different bytes, and sizes are integers.
-    ``bool`` is rejected for non-boolean fields because Python's ``bool`` is an
-    ``int`` subclass and would sail through a naive integer check while
-    serialising as ``true``.
+    ``1`` are the same number but different bytes, and the format has no
+    float-valued fields.
+
+    ``bool`` is **accepted**, because ``isexec`` is genuinely boolean. Note the
+    consequence: Python's ``bool`` is an ``int`` subclass, so ``{"size": True}``
+    canonicalises to ``"size":true`` rather than being rejected here. Catching that
+    belongs to :meth:`chirograph.manifest.FileEntry.from_dict`, which knows which
+    field is which — canonicalisation is deliberately a *syntactic* function of
+    whatever array it is given (spec §4, docs/decisions.md D-06) and must not grow
+    per-field semantics.
     """
     if value is None:
         raise SchemaError(
@@ -155,8 +161,23 @@ def canonical_text(files: Sequence[Entry]) -> str:
 
 
 def canonicalise(files: Sequence[Entry]) -> bytes:
-    """Return the canonical UTF-8 bytes of *files* (spec §4)."""
-    return canonical_text(files).encode("utf-8")
+    """Return the canonical UTF-8 bytes of *files* (spec §4).
+
+    Encoding is where a value containing an unpaired surrogate finally fails, so
+    it is translated here. Canonicalisation takes raw mappings and does not run
+    path validation (which would reject surrogates up front), and a bare
+    ``UnicodeEncodeError`` from a function documented to raise
+    :class:`~chirograph.errors.SchemaError` would escape every caller's
+    ``except ChirographError``.
+    """
+    text = canonical_text(files)
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise SchemaError(
+            f"the canonical form cannot be encoded as UTF-8: {exc}. Some value contains an "
+            f"unpaired surrogate, which usually means a path whose bytes are not valid UTF-8."
+        ) from exc
 
 
 def compute_body_hash(files: Sequence[Entry], algorithm: str = "md5") -> str:
@@ -202,9 +223,17 @@ def dvc_dir_bytes(files: Sequence[Entry], algorithm: str = "md5") -> bytes:
     sha256 for local caches.
     """
     key = "md5" if algorithm == "md5" else algorithm
-    projected = [
-        {key: entry["md5"], "relpath": entry["relpath"]} for entry in normalise_entries(files)
-    ]
+    projected = []
+    for index, entry in enumerate(normalise_entries(files)):
+        digest = entry.get("md5")
+        if not isinstance(digest, str):
+            # This is a public function, so it gets a real error rather than a bare
+            # KeyError leaking out of a comprehension.
+            raise SchemaError(
+                f"files[{index}] ({entry['relpath']!r}) has no string 'md5'; a DVC .dir "
+                f"cannot be derived without a digest"
+            )
+        projected.append({key: digest, "relpath": entry["relpath"]})
     projected.sort(key=lambda entry: str(entry["relpath"]))
     return json.dumps(projected, sort_keys=True).encode("utf-8")
 

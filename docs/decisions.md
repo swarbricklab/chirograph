@@ -30,6 +30,8 @@ it** where that is not obvious.
 | [D-15](#d-15) | `chiro://` syntax is in-scope; resolution is not | scope |
 | [D-16](#d-16) | CLI exit codes distinguish "finding" from "tool failure" | new |
 | [D-17](#d-17) | Derived fields are computed, never stored on the object | new |
+| [D-18](#d-18) | Digests must be lowercase hex; no silent lower-casing | review finding |
+| [D-19](#d-19) | A 1.x minor may only add **scalar** fields | format constraint |
 
 ---
 
@@ -496,6 +498,61 @@ perform; it is the only way to get an object at all.
 
 ---
 
+## D-18 — Digests must be lowercase hex. They are not silently lower-cased. {#d-18}
+
+Found by adversarial review. ``check_digest`` used to lower-case a digest and
+carry on, which quietly broke [D-06](#d-06): canonicalisation is supposed to be a
+pure syntactic function of the array it is handed, and lower-casing is a
+rewrite. The visible symptom was worse than the principle — a manifest whose
+``body_hash`` was *exactly* what spec §4 yields for its own uppercase ``files``
+array was rejected with a ``BodyHashMismatch`` blaming truncation or corruption:
+
+```
+error: BodyHashMismatch: … declares '11528e44…', recomputed '5f37d7ba…' …
+       The file list has been truncated, edited, or corrupted …
+```
+
+Nothing was corrupt. The reader had hashed a lower-cased copy of an array it then
+compared against a hash of the original.
+
+**Decision.** Digests — ``files[].md5`` and ``body_hash`` — must be lowercase
+hexadecimal, stated in spec §3.2, and an uppercase one is a ``SchemaError`` whose
+message says so and shows the lower-cased value.
+
+Either half of the alternative was worse: rewriting before hashing makes §4
+impure and leaves a second implementation "non-conformant" against an unwritten
+rule, while accepting both cases without rewriting gives one manifest two
+``body_hash`` values. Mandating the case is the only option that keeps §4 a pure
+function *and* tells the truth in the error.
+
+No vector changes: all frozen vectors were already lowercase.
+
+---
+
+## D-19 — A ``1.x`` minor version may only add **scalar** fields. {#d-19}
+
+A limitation of [D-07](#d-07), surfaced by review: unknown fields at a higher
+minor are tolerated and preserved, but only if their values are scalars. A
+non-scalar unknown field is still rejected, so D-07's forward-compatibility
+promise is narrower than it first reads.
+
+**Decision.** Keep it, and state it in the spec as a constraint on future minor
+versions rather than papering over it.
+
+**Why.** An unknown field is included in canonicalisation, so tolerating one means
+committing to a canonical form for its value. For a scalar that is already
+defined by spec §4. For a nested object or array it is not: key ordering within a
+nested object, and whether nested paths get NFC-normalised, would both need
+answering — and every implementation would have to guess the same answer or
+produce a different ``body_hash``. Accepting non-scalars "for forward
+compatibility" would therefore *create* the silent divergence that §4 exists to
+prevent.
+
+So a future minor may add scalar fields freely; anything structured needs a major
+version, where readers are expected to fail loudly rather than tolerate.
+
+---
+
 ## Follow-ups
 
 What needs your eye, in priority order:
@@ -530,6 +587,68 @@ Smaller loose ends:
    needs those repositories.
 6. Nothing has been pushed. The work is on the branch
    `implement-milestone-0-and-1`; `main` is untouched.
+
+### Found by adversarial review
+
+An adversarial review pass ran every high-risk area against actual
+reproductions. Ten findings, all fixed, all with regression tests. The ones worth
+your attention:
+
+- **`join_source_url` returned URLs outside the base — twice over.** It used
+  `urllib.parse.urljoin`, which (a) only resolves relative references for schemes
+  in `uses_relative`, so `geo://GSE12345/` + `a.gz` returned a bare `"a.gz"`, and
+  (b) appends a trailing slash to the *query* when the base has one, discarding the
+  base path. `geo://` is the spec's own §3.2 example and `s3://` is named in §3.2
+  and §6.1, so `fetch_plan()` was handing `archivefs` a relative path where a URL
+  belonged, for the commonest cases. Now joined explicitly on the path component,
+  carrying scheme/netloc/query/fragment through. The exported helper also
+  validates its own `source` argument now.
+- **`chiro remap` destroyed paths when a rule matched nothing.** `apply_rules`
+  returns its input unchanged on no match, and remap assigned that
+  unconditionally — so `--relpath-from-source` with a non-matching rule
+  overwrote every uncovered entry's `relpath` with its `source_path`, silently
+  replacing the workspace layout with the deposit layout; the mirror case deleted
+  `source_path`, losing the fetch location. Split into `try_apply_rules`, which
+  returns `None` on no match, and the count of untouched entries is now reported.
+- **A non-UTF-8 filename crashed rather than erroring.** Python surfaces such
+  names as surrogates, `str.encode` raises `UnicodeEncodeError`, and that escaped
+  every `except ChirographError` — turning a *finding* into a *tool failure* and
+  aborting a `chiro validate` batch before it reported the manifests it had
+  already checked. A latin-1 filename in a deposit is entirely routine. Rejected
+  properly now, with the file named. Writing the message then crashed too (it
+  *contains* the surrogate), so the CLI's streams are wrapped to survive it.
+- **`--from-dvc-cache` emitted manifests the tool then rejected.** It hard-coded
+  `hash_algorithm="md5"` while accepting sha256 and non-hex digests, and
+  `--created` was assigned *after* construction so it bypassed the timestamp
+  validation of [D-05](#d-05). Both wrote a file and exited 0. The algorithm now
+  comes from the `.dvc`, digests are validated before anything is written, and
+  `created` goes through the constructor.
+- **`--stdout` suppressed every note and warning**, so the obvious
+  `chiro write … --stdout > m.chiro.json` idiom silently discarded things like "the
+  `.dvc`'s declared size disagrees with the recovered sizes; one of them is stale".
+  They go to stderr now, which cannot contaminate the piped manifest.
+- **`extra` could shadow a computed field**, since it is serialised last:
+  `extra={"relpath": "../../etc/evil"}` emitted a path that never saw
+  `validate_path`, and `extra={"body_hash": …}` emitted a body_hash that was not a
+  hash of the body. Unreachable through `from_dict`, but this is the documented
+  public object model, so the constructor now refuses colliding keys.
+- Plus: the NFD fallback decomposed the *root* as well as the relative path (so a
+  present file under `réf_root/` verified as "missing"); `normalise_order` raised
+  `TypeError` for a non-NFC path plus an unknown field; `dvc_dir_bytes` raised a
+  bare `KeyError`; `chiro validate` and `chiro verify` disagreed on the exit code
+  for a BOM'd manifest; and `_check_scalar`'s docstring claimed to reject `bool`
+  when it accepts it (correctly — `isexec` is boolean). See [D-18](#d-18) and
+  [D-19](#d-19) for the two that became decisions.
+
+The review also cleared several areas it could not break, which is worth
+recording: no accepted path escapes the import target (fullwidth and division
+solidus, `....//`, percent-encoded traversal, overlong components and bidi
+overrides were all tried, and no codepoint's NFC or NFD form contains `/`, `\`,
+`.` or `:` — 38 do under NFKC, which is why using NFC here is right); `paths` and
+`disk_paths` cannot desynchronise; sampling has no off-by-one and
+`random.Random(str)` is byte-identical across CPython 3.6–3.14; and sixteen
+malformed `.dvc`/`dvc.lock` shapes all produce a `DvcError` rather than a
+traceback.
 
 ### Found by verification rather than by design
 

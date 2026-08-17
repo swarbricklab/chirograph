@@ -220,3 +220,20 @@ def test_nfd_on_disk_is_found_via_fallback(tmp_path: Path) -> None:
     manifest = Manifest(files=[FileEntry(nfc, MD5_HELLO, 6)])
     report = verify_tree(manifest, tmp_path)
     assert report.ok, [r.to_dict() for r in report.failures]
+
+
+def test_nfd_fallback_works_when_the_root_itself_has_an_accent(tmp_path: Path) -> None:
+    """The fallback used to decompose the *whole* path, root included.
+
+    So a present file under a root like `réf_root/` was looked for under a
+    decomposed root that does not exist, and reported missing.
+    """
+    nfd_name = "cafe\u0301.txt"  # e + COMBINING ACUTE ACCENT, as macOS writes it
+    nfc_name = "caf\u00e9.txt"  # precomposed, as a manifest records it
+    for root_name in ("ascii_root", "r\u00e9f_root", "cafe\u0301_root"):
+        root = tmp_path / root_name
+        root.mkdir()
+        (root / nfd_name).write_bytes(b"hello\n")
+        manifest = Manifest(files=[FileEntry(nfc_name, MD5_HELLO, 6)])
+        report = verify_tree(manifest, root)
+        assert report.ok, (root_name, [r.to_dict() for r in report.failures])

@@ -62,25 +62,39 @@ def check_algorithm(algorithm: str) -> str:
 
 
 def check_digest(digest: object, algorithm: str, *, field: str = "md5") -> str:
-    """Validate a hex digest against *algorithm*, returning it lowercased.
+    """Validate a hex digest against *algorithm*, returning it unchanged.
 
     Length is checked against the algorithm because a 32-character digest in a
     ``sha256`` manifest is not a typo, it is a manifest that was written by
     ingesting md5s under the wrong header — the kind of mistake that would
     otherwise surface as a mass verification failure much later.
+
+    **Digests must be lowercase** (docs/decisions.md D-18). This used to silently
+    lower-case them instead, which broke the promise that canonicalisation does no
+    semantic rewriting (spec §4, D-06): a manifest whose ``body_hash`` was exactly
+    what §4 yields for its own uppercase ``files`` array was rejected with a
+    ``BodyHashMismatch`` blaming corruption. Rejecting with a message that names
+    the actual problem is the only option that keeps §4 a pure function *and*
+    tells the truth.
     """
     if not isinstance(digest, str):
         raise SchemaError(f"{field} must be a string, got {type(digest).__name__}")
     expected = HASH_ALGORITHMS[check_algorithm(algorithm)]
-    lowered = digest.lower()
-    if len(lowered) != expected:
+    if len(digest) != expected:
         raise SchemaError(
             f"{field} {digest!r} is {len(digest)} characters; {algorithm} digests "
             f"are {expected} hex characters"
         )
-    if not all(c in "0123456789abcdef" for c in lowered):
-        raise SchemaError(f"{field} {digest!r} is not lowercase-able hexadecimal")
-    return lowered
+    if not all(c in "0123456789abcdef" for c in digest):
+        if all(c in "0123456789abcdefABCDEF" for c in digest):
+            raise SchemaError(
+                f"{field} {digest!r} is uppercase. Digests must be lowercase hexadecimal: "
+                f"canonicalisation hashes the array exactly as given, so accepting either "
+                f"case would give one manifest two body_hash values "
+                f"(docs/decisions.md D-18). Lower-case it: {digest.lower()}"
+            )
+        raise SchemaError(f"{field} {digest!r} is not hexadecimal")
+    return digest
 
 
 def new_hasher(algorithm: str) -> Any:

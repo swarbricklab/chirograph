@@ -16,6 +16,7 @@ from chirograph.errors import (
     UnsupportedVersion,
 )
 from chirograph.manifest import FileEntry, Manifest
+from chirograph.paths import validate_path
 
 MD5_A = "b1946ac92492d2347c6235b4d2611184"
 MD5_B = "591785b794601e212b260e25925636fd"
@@ -357,3 +358,130 @@ def test_zero_byte_file_is_linted() -> None:
 
 def test_clean_manifest_lints_clean() -> None:
     assert codes(sample()) == set()
+
+
+# --------------------------------------------------------------------------- #
+# Regressions from the adversarial review
+# --------------------------------------------------------------------------- #
+
+
+def test_url_join_works_for_non_hierarchical_schemes() -> None:
+    """urljoin returns the reference unchanged for schemes it doesn't know.
+
+    ``geo://`` is the spec's own §3.2 example and ``s3://`` is named in §3.2 and
+    §6.1, so this was the common case, not an edge one: fetch_plan() handed a
+    consumer a bare relative path where a URL belonged.
+    """
+    for base in ("geo://GSE12345/", "s3://bucket/pre/", "gs://b/p/", "ega://EGAD001/"):
+        manifest = Manifest(files=[FileEntry("a/b.gz", MD5_A, 1)], source_url=base)
+        url = manifest.fetch_plan()[0].url
+        assert url == base.rstrip("/") + "/a/b.gz", url
+        assert "://" in url
+
+
+def test_url_join_keeps_the_base_path_when_there_is_a_query() -> None:
+    """Appending the slash to a query is how the base path used to get discarded."""
+    manifest = Manifest(
+        files=[FileEntry("a/b.gz", MD5_A, 1)],
+        source_url="https://ega.example.org/files?dataset=EGAD001",
+    )
+    assert manifest.fetch_plan()[0].url == ("https://ega.example.org/files/a/b.gz?dataset=EGAD001")
+
+
+def test_url_join_keeps_the_base_path_when_there_is_a_fragment() -> None:
+    manifest = Manifest(
+        files=[FileEntry("a/b.gz", MD5_A, 1)],
+        source_url="https://zenodo.org/api/records/123/files#top",
+    )
+    assert manifest.fetch_plan()[0].url == ("https://zenodo.org/api/records/123/files/a/b.gz#top")
+
+
+def test_url_join_validates_its_source_argument() -> None:
+    """It is exported as the spec §9 helper, so it cannot trust its caller."""
+    from chirograph import join_source_url
+
+    for hostile in ("//evil.example/x", "sub/../../x", "/abs", ".."):
+        with pytest.raises(PathSafetyError):
+            join_source_url("https://host/base/", hostile)
+
+
+def test_surrogate_relpath_is_a_path_safety_error_not_a_crash() -> None:
+    """A "\\udcff" escape is pure ASCII on the wire, so no transport rejects it.
+
+    Before, ``path.encode("utf-8")`` raised UnicodeEncodeError, which escaped
+    every ``except ChirographError`` and aborted a whole `validate` batch.
+    """
+    with pytest.raises(PathSafetyError, match="surrogate"):
+        validate_path("a\udcffb")
+
+
+def test_surrogate_in_canonicalisation_is_a_schema_error() -> None:
+    from chirograph.canonical import canonicalise
+
+    with pytest.raises(SchemaError, match="UTF-8"):
+        canonicalise([{"relpath": "a\udcffb", "md5": MD5_A, "size": 1}])
+
+
+def test_uppercase_digest_is_rejected_with_a_message_about_case() -> None:
+    """Silently lower-casing broke the "no semantic rewriting" promise (D-06).
+
+    A manifest whose body_hash was exactly what §4 yields for its own uppercase
+    files array was rejected as *corrupt*, which is both wrong and unhelpful.
+    """
+    document = document_with_uppercase_digest()
+    with pytest.raises(SchemaError, match="uppercase"):
+        Manifest.from_dict(document)
+
+
+def document_with_uppercase_digest() -> dict:
+    from chirograph.canonical import compute_body_hash
+
+    files = [{"relpath": "a.txt", "md5": MD5_A.upper(), "size": 6}]
+    return {
+        "schema": "chirograph",
+        "schema_version": "1.0",
+        "hash_algorithm": "md5",
+        "provenance_type": "self-deposited",
+        "created": "2026-01-01T00:00:00Z",
+        "size": 6,
+        "nfiles": 1,
+        "body_hash": compute_body_hash(files),
+        "files": files,
+    }
+
+
+def test_uppercase_body_hash_is_rejected_as_a_case_problem() -> None:
+    document = json.loads(json.dumps(sample().to_dict()))
+    document["body_hash"] = document["body_hash"].upper()
+    with pytest.raises(SchemaError, match="uppercase"):
+        Manifest.from_dict(document)
+
+
+def test_extra_cannot_shadow_a_real_entry_field() -> None:
+    """extra is serialised after the known fields, so it would win."""
+    with pytest.raises(SchemaError, match="collide"):
+        FileEntry("safe.txt", MD5_A, 1, extra={"relpath": "../../etc/evil"})
+
+
+def test_extra_cannot_shadow_the_computed_header_fields() -> None:
+    with pytest.raises(SchemaError, match="collide"):
+        Manifest(
+            files=[FileEntry("a.txt", MD5_A, 1)],
+            extra={"body_hash": "deadbeef", "size": 999, "nfiles": 999},
+        )
+
+
+def test_extra_cannot_shadow_files() -> None:
+    with pytest.raises(SchemaError, match="collide"):
+        Manifest(files=[FileEntry("a.txt", MD5_A, 1)], extra={"files": []})
+
+
+def test_non_nfc_relpath_with_an_unknown_field_does_not_crash() -> None:
+    """normalise_order used to rebuild the entry with FileEntry(**row).
+
+    The row is a flattened mapping that includes `extra`, so the combination of a
+    non-NFC path and a forward-compatible unknown field raised TypeError.
+    """
+    manifest = Manifest(files=[FileEntry("cafe\u0301.txt", MD5_A, 1, extra={"future_field": 1})])
+    assert manifest.files[0].relpath == "caf\u00e9.txt"  # folded to NFC
+    assert manifest.files[0].extra == {"future_field": 1}
