@@ -56,6 +56,7 @@ __all__ = [
     "load",
     "loads",
     "normalise_order",
+    "read_manifest_bytes",
 ]
 
 #: Digest lengths any supported algorithm can produce. Precomputed because it is
@@ -667,7 +668,7 @@ class Manifest:
     @classmethod
     def load(cls, path: str | os.PathLike[str], **kwargs: Any) -> Manifest:
         try:
-            return cls.loads(Path(path).read_bytes(), **kwargs)
+            return cls.loads(read_manifest_bytes(path), **kwargs)
         except ManifestError as exc:
             raise type(exc)(f"{path}: {exc}") from exc
 
@@ -696,6 +697,28 @@ _BOMS: tuple[tuple[bytes, str], ...] = (
     (b"\xfe\xff", "UTF-16 big-endian"),
     (b"\xff\xfe", "UTF-16 little-endian"),
 )
+
+
+def read_manifest_bytes(path: str | os.PathLike[str]) -> bytes:
+    """Read a manifest file, refusing anything that is not a regular file.
+
+    The check happens *before* opening, because opening a FIFO blocks until a writer
+    appears — in CI that is a hung job rather than a failed one, which is far worse
+    than an error. A directory, socket or device is equally not a manifest.
+
+    Lives here rather than in each command so that every read path gets it: the
+    check was originally added to ``chiro validate`` alone, and `verify`, `info`,
+    `ls`, `ref`, `dvc-dir`, `remap` and `diff` all still hung.
+    """
+    target = Path(path)
+    if target.is_dir():
+        raise OSError(f"{target} is a directory, not a manifest")
+    # `exists()` follows symlinks, so a link to a FIFO is caught too. A broken
+    # symlink falls through to `read_bytes` and raises FileNotFoundError, which is
+    # the right message.
+    if target.exists() and not target.is_file():
+        raise OSError(f"{target} is not a regular file")
+    return target.read_bytes()
 
 
 def decode_document(raw: bytes) -> str:

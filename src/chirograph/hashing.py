@@ -129,7 +129,14 @@ def hash_file(path: str | os.PathLike[str], algorithm: str = "md5") -> str:
     larger than memory (a Visium matrix, a BAM).
     """
     hasher = new_hasher(algorithm)
-    with open(path, "rb", buffering=0) as handle:
+    # Refuse a non-regular file before opening: a FIFO would block until a writer
+    # appears, hanging rather than failing. Payload files are always regular.
+    target = os.fspath(path)
+    if os.path.isdir(target):
+        raise IsADirectoryError(f"{target} is a directory")
+    if os.path.exists(target) and not os.path.isfile(target):
+        raise OSError(f"{target} is not a regular file")
+    with open(target, "rb", buffering=0) as handle:
         while chunk := handle.read(CHUNK_SIZE):
             hasher.update(chunk)
     return str(hasher.hexdigest())

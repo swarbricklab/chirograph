@@ -32,7 +32,7 @@ from .constants import (
 )
 from .diff import diff_manifests
 from .errors import ChirographError
-from .manifest import Manifest, decode_document
+from .manifest import Manifest, decode_document, read_manifest_bytes
 from .ref import ChiroRef, canonical_ref
 from .rewrite import parse_rules
 from .version import __version__
@@ -808,15 +808,7 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     for name in args.manifest:
         entry: dict[str, object] = {"path": name}
         try:
-            target = Path(name)
-            # Refuse anything that is not a regular file *before* opening it. Reading
-            # a FIFO blocks forever, which in CI is a hung job rather than a failed
-            # one; a directory or device is equally not a manifest.
-            if target.is_dir():
-                raise OSError(f"{name} is a directory")
-            if target.exists() and not target.is_file():
-                raise OSError(f"{name} is not a regular file")
-            raw = target.read_bytes()
+            raw = read_manifest_bytes(name)
         except OSError as exc:
             # Cannot read the file: a tool failure, not a verdict on the manifest, so
             # it is reported as an error rather than as INVALID (docs/decisions.md

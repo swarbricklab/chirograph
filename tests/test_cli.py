@@ -873,3 +873,47 @@ def test_validate_rejects_a_directory(tmp_path: Path, capsys) -> None:
     code, out, _ = run(capsys, "validate", str(tmp_path))
     assert code == EXIT_ERROR
     assert "is a directory" in out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["validate", "{fifo}"],
+        ["verify", "{fifo}"],
+        ["info", "{fifo}"],
+        ["ls", "{fifo}"],
+        ["ref", "{fifo}"],
+        ["dvc-dir", "{fifo}"],
+        ["remap", "{fifo}", "--stdout"],
+        ["diff", "{good}", "{fifo}"],
+    ],
+    ids=lambda argv: argv[0],
+)
+def test_no_command_hangs_on_a_fifo(built: Path, tmp_path: Path, capsys, argv: list[str]) -> None:
+    """The check was first added to `validate` alone; seven commands still hung.
+
+    A hung CI job is worse than a failed one, so the guard now lives in the single
+    read path (`read_manifest_bytes`) rather than in one command. No timeout is
+    needed here: if this regresses, the test hangs and that is the signal.
+    """
+    fifo = tmp_path / "pipe.chiro.json"
+    try:
+        os.mkfifo(fifo)
+    except (AttributeError, OSError):  # pragma: no cover
+        pytest.skip("cannot create a FIFO here")
+    resolved = [a.format(fifo=str(fifo), good=str(built)) for a in argv]
+    code, _, _ = run(capsys, *resolved)
+    assert code == EXIT_ERROR
+
+
+def test_hashing_a_fifo_fails_rather_than_blocking(tmp_path: Path) -> None:
+    """Same guard for payload files, which `verify` reads."""
+    from chirograph.hashing import hash_file
+
+    fifo = tmp_path / "pipe.dat"
+    try:
+        os.mkfifo(fifo)
+    except (AttributeError, OSError):  # pragma: no cover
+        pytest.skip("cannot create a FIFO here")
+    with pytest.raises(OSError, match="not a regular file"):
+        hash_file(fifo)
