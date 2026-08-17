@@ -242,6 +242,27 @@ def test_validate_with_jsonschema(built: Path, capsys) -> None:
     assert code == EXIT_OK
 
 
+def test_validate_missing_optional_dep_is_a_tool_error_not_a_finding(
+    built: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A runner without the `schema` extra must not make a good manifest INVALID.
+
+    Exit 1 means "this manifest is a lie" and would block a merge; exit 2 means
+    "the tool could not run" and should page whoever owns the runner
+    (docs/decisions.md D-16).
+    """
+    import chirograph.schema as schema_module
+
+    def unavailable(_document: object) -> list[str]:
+        raise RuntimeError("needs the `jsonschema` package")
+
+    monkeypatch.setattr(schema_module, "validate_document", unavailable)
+    code, out, err = run(capsys, "validate", str(built), "--jsonschema")
+    assert code == EXIT_ERROR
+    assert "jsonschema" in err
+    assert "INVALID" not in out
+
+
 def test_validate_reports_lint_warnings(tmp_path: Path, capsys) -> None:
     manifest = Manifest(
         provenance_type="observed-download",

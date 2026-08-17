@@ -713,6 +713,17 @@ def _as_messages(value: object) -> list[str]:
 def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     from .schema import validate_document
 
+    # A missing optional dependency means the tool cannot perform a check that was
+    # asked for — exit 2 — and must NOT be reported as the manifest being invalid.
+    # Getting this wrong would make a CI gate block a merge over a perfectly good
+    # manifest whose only problem was the runner's install (docs/decisions.md D-16).
+    if args.jsonschema:
+        try:
+            validate_document({})
+        except RuntimeError as exc:
+            err.write(f"{PROGRAM}: {exc}\n")
+            return EXIT_ERROR
+
     reports: list[dict[str, object]] = []
     worst = EXIT_OK
     for name in args.manifest:
@@ -729,10 +740,7 @@ def cmd_validate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         errors: list[str] = []
         warnings: list[str] = []
         if args.jsonschema:
-            try:
-                errors.extend(f"schema: {message}" for message in validate_document(document))
-            except RuntimeError as exc:
-                errors.append(str(exc))
+            errors.extend(f"schema: {message}" for message in validate_document(document))
 
         try:
             manifest = Manifest.from_dict(document)
