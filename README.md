@@ -48,7 +48,9 @@ pytest && ruff check . && mypy
 Describe a directory you are about to deposit:
 
 ```bash
-chiro write ./deposit --accession GSE000000 -o GSE000000.chiro.json
+chiro write ./deposit --accession GSE000000 -o tmp.chiro.json
+D=$(chiro ref tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
+mv tmp.chiro.json "$D.chiro.json"        # manifests are named by their own digest
 ```
 
 Capture a dataset you downloaded, reorganising a flat deposit into a tidy workspace
@@ -56,38 +58,38 @@ tree as you go (one rule does the whole worked example in docs/howto-reference-d
 
 ```bash
 chiro capture ./deposit \
-    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE000nnn/GSE000000/suppl/' \
+    --source-url 'geo://GSE000000' \
     --accession GSE000000 \
     --relpath-from-source '^GSE000000_([^_]+)_(.*)$=>\1/\2' \
-    -o GSE000000.chiro.json
+    -o tmp.chiro.json
 ```
 
 Transcribe what DVC has already hashed, without re-reading a byte:
 
 ```bash
-chiro write --from-dvc-cache data.dvc -o data.chiro.json
+chiro write --from-dvc-cache data.dvc -o tmp.chiro.json
 ```
 
 Check bytes against a manifest, or just the manifest's own integrity:
 
 ```bash
-chiro verify GSE000000.chiro.json --root ./deposit --source-layout
-chiro validate GSE000000.chiro.json          # reads no data — a registry's Tier-1 gate
-chiro verify  GSE000000.chiro.json --sample 100   # bounded-cost spot check
+chiro verify   "$D.chiro.json" --root ./deposit --source-layout
+chiro validate "$D.chiro.json"                 # reads no data — a registry's Tier-1 gate
+chiro verify   "$D.chiro.json" --sample 100    # bounded-cost spot check
 ```
 
 Detect that an upstream record has changed under a stable accession:
 
 ```bash
-chiro capture ./deposit --source-url ... -o later.chiro.json
-chiro diff GSE000000.chiro.json later.chiro.json
+chiro capture ./deposit --source-url geo://GSE000000 -o tmp.chiro.json
+chiro diff <first-digest>.chiro.json tmp.chiro.json
 ```
 
 A manifest never written to disk can be checked by streaming it:
 
 ```bash
-curl -sL https://example.org/GSE000000.chiro.json | chiro validate /dev/stdin
-chiro validate <(curl -sL https://example.org/GSE000000.chiro.json)
+curl -sL https://example.org/<digest>.chiro.json | chiro validate /dev/stdin
+chiro validate <(curl -sL https://example.org/<digest>.chiro.json)
 ```
 
 `chiro --help` lists the rest: `info`, `ls`, `ref`, `remap`, `dvc-dir`, `schema`,
@@ -101,7 +103,7 @@ chiro validate <(curl -sL https://example.org/GSE000000.chiro.json)
 ```python
 import chirograph
 
-manifest = chirograph.load("GSE000000.chiro.json")  # validates schema + Layer 2
+manifest = chirograph.load(manifest_path)  # validates schema + Layer 2
 for item in manifest.fetch_plan():  # fetch resolution; see docs/chiro-format-rationale.md §11
     ...  # fetch item.url, place at item.relpath, check against item.md5
 

@@ -308,7 +308,55 @@ ceremony. Recorded here because it will look like an obvious idea to the next pe
 
 ---
 
-## 13. What the format does not do
+## 13. Why manifests are named after their own digest
+
+Spec §1.1 asks for `<digest>.chiro.json` rather than `GSE000000.chiro.json`. Earlier
+drafts had it the other way round, on the grounds that a human browsing a deposit can
+read an accession and cannot read a hash. That is true and it is outweighed.
+
+**Multiple observations of one record must be able to coexist.** This is the decisive
+argument. Detecting that an upstream record has changed means holding two dated
+observations of the same accession — that pair *is* the drift record. Under
+accession-derived naming they are the same filename, so recording the second destroys
+the first. The convention was actively hostile to one of the format's main purposes.
+
+**A digest-named manifest is self-verifying with no tooling.** `md5sum *.chiro.json`
+checks every name against its content. Nothing needs to be installed, and nothing
+needs to be trusted. For a reader ten years from now that is the property that matters
+most.
+
+**Writes stop colliding.** Two processes recording the same manifest write the same
+filename with the same bytes, so concurrent writes are safe by construction rather than
+by locking. That matters on HPC, where array jobs share a filesystem.
+
+**Immutability becomes self-enforcing.** Nobody edits a file whose name is its hash,
+for the same reason nobody edits a Git object. This is not merely cultural: it
+neutralises the one real hazard in whole-file addressing, which is that reformatting a
+manifest silently changes its `chiro://` reference. Under digest naming the damage is
+visible —
+
+```
+filename says : 6f174b49ded208801052240cf05798c8
+md5sum says   : 64506a3400bc97573bab5625271983db
+```
+
+— where under accession naming it is invisible. That is the argument that settled
+whether `chiro://` should address the whole file or the canonical document (§12): the
+whole file, because digest *filenames* make its fragility detectable, and because
+`md5sum`-verifiability is worth more than reformat-tolerance.
+
+**The exception is real, though.** For a deposit that non-Chirograph consumers will
+browse, an accession-derived name is genuinely better: it is legible, it sorts
+predictably next to the record's other files, and it survives being downloaded into a
+directory of other records' manifests. That case is why §1.1 says SHOULD rather than
+MUST.
+
+Note that auto-discovery does not depend on the name either way: archivefs looks for
+`*.chiro.json` and refuses to guess when a deposit contains more than one.
+
+---
+
+## 14. What the format does not do
 
 Worth stating plainly, because "attestation" invites over-reading.
 

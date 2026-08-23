@@ -49,19 +49,33 @@ The manifest is self-sufficient. If you have it, you can fetch the data with not
 else:
 
 ```bash
-archivefs get .chiro/manifests/GSE111111.chiro.json --dest ./data/reference/GSE111111
+archivefs get geo://GSE111111 ./data/reference/GSE111111 \
+    -o chiro=.chiro/manifests/<digest>.chiro.json
 ```
 
-`archivefs get` downloads and verifies against the manifest's digests as it goes. For
-credentialed archives (EGA, dbGaP) it will need credentials configured; `archivefs
+Note the argument order: `archivefs get <url> <dest>`, both positional. The URL is the
+**archive** URL, and the manifest is attached with the `chiro` storage option — the
+manifest is what supplies the per-file checksums and the workspace layout, but the
+bytes still come from the archive.
+
+The `chiro` option accepts a local path (the common case: a manifest committed next to
+the `.dvc`), an absolute path, or a URL. Omit it entirely and archivefs looks for a
+`*.chiro.json` inside the deposit itself, refusing to guess if it finds more than one.
+
+For credentialed archives (EGA, dbGaP) credentials must be configured; `archivefs
 info` reports what is wired up.
 
 To see what a manifest expects before fetching anything:
 
 ```bash
-chiro ls   .chiro/manifests/GSE111111.chiro.json     # both paths, per entry
-chiro info .chiro/manifests/GSE111111.chiro.json     # header, totals, provenance
+chiro ls   -l   .chiro/manifests/<digest>.chiro.json   # workspace paths, size, hash
+chiro ls --source .chiro/manifests/<digest>.chiro.json # deposit paths instead
+chiro ls --urls   .chiro/manifests/<digest>.chiro.json # resolved fetch URLs
+chiro info        .chiro/manifests/<digest>.chiro.json # header, totals, provenance
 ```
+
+`chiro ls` shows one view at a time rather than both paths at once, so use `--source`
+or `--urls` when you need to see where the bytes come from.
 
 ---
 
@@ -72,13 +86,13 @@ Three levels, cheapest first. All three use the same exit-code contract: `0` suc
 
 ```bash
 # Reads no data at all. Checks the manifest's own integrity (Layer 2).
-chiro validate .chiro/manifests/GSE111111.chiro.json
+chiro validate .chiro/manifests/<digest>.chiro.json
 
 # Bounded cost: hash a deterministic sample of files.
-chiro verify .chiro/manifests/GSE111111.chiro.json --sample 100
+chiro verify .chiro/manifests/<digest>.chiro.json --sample 100
 
 # Full: hash every byte.
-chiro verify .chiro/manifests/GSE111111.chiro.json
+chiro verify .chiro/manifests/<digest>.chiro.json
 ```
 
 `chiro validate` is worth knowing about. It confirms that the file list has not been
@@ -135,12 +149,21 @@ from git, or by its `chiro://` reference. Note that re-indenting or re-saving a 
 changes its whole-file digest even when `body_hash` still matches, which is why
 manifests should be treated as immutable artifacts rather than edited.
 
+### Comparing a live deposit against its manifest
+
+`archivefs check <url>` does this in one step — it fetches the deposit's listing and
+compares it against the manifest the deposit carries, without downloading the data:
+
+```bash
+archivefs check geo://GSE111111
+```
+
 ### Diagnosing without the data
 
 ```bash
-chiro verify manifest.chiro.json --layer 2     # is the manifest itself intact?
-chiro info   manifest.chiro.json               # what does it claim, and how was it made?
-chiro diff   old.chiro.json new.chiro.json     # what changed between two observations?
+chiro verify <digest>.chiro.json --layer 2      # is the manifest itself intact?
+chiro info   <digest>.chiro.json               # what does it claim, and how was it made?
+chiro diff   <old>.chiro.json <new>.chiro.json  # what changed between two observations?
 ```
 
 ---
@@ -170,7 +193,7 @@ outside the authors' control.
 **3. Fetch and check.**
 
 ```bash
-dvc pull    # or: archivefs get <manifest> --dest <path>
+dvc pull    # or: archivefs get <archive-url> <dest> -o chiro=<manifest>
 for m in .chiro/manifests/*.chiro.json; do chiro verify "$m" || exit 1; done
 ```
 

@@ -33,9 +33,16 @@ failure, while the deposit is still yours to fix.
 mkdir -p .chiro/manifests
 chiro write ./data/generated/xenium-panel \
     --accession GSE000000 \
-    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE000nnn/GSE000000/suppl/' \
-    -o .chiro/manifests/GSE000000.chiro.json
+    --source-url 'geo://GSE000000' \
+    -o .chiro/manifests/tmp.chiro.json
 ```
+
+Use the archive scheme (`geo://GSE000000`), not the underlying FTP path. The scheme is
+what `archivefs` resolves, so the manifest stays valid if NCBI reorganises its
+directory layout — and `GSE000nnn`-style path sharding is exactly the sort of detail
+that changes. The available schemes are `geo://`, `zenodo://`, `ega://`, `bia://` and
+`dbgap://`; for a source with no backend (a plain FTP release, say) use its URL
+directly.
 
 `chiro write` defaults to `--provenance self-deposited`, which is correct here: you are
 the authoritative source, the digests were computed from your own originals, and there
@@ -56,9 +63,9 @@ Going *from* a workspace tree *to* a flat deposit is `--source-from-relpath`:
 ```bash
 chiro write ./data/generated/xenium-panel \
     --accession GSE000000 \
-    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE000nnn/GSE000000/suppl/' \
+    --source-url 'geo://GSE000000' \
     --source-from-relpath '^([^/]+)/(.*)$=>GSE000000_\1_\2' \
-    -o .chiro/manifests/GSE000000.chiro.json
+    -o .chiro/manifests/tmp.chiro.json
 ```
 
 That turns a workspace path `sampleA/matrix.mtx.gz` into a deposit name
@@ -71,7 +78,7 @@ knows where to look and the materialiser knows where to put it.
 Check it before you upload anything:
 
 ```bash
-chiro ls .chiro/manifests/GSE000000.chiro.json
+chiro ls .chiro/manifests/tmp.chiro.json
 ```
 
 `chiro ls` shows both paths per entry, which is the only way to catch a regex that did
@@ -79,30 +86,62 @@ something almost right.
 
 ---
 
-## Step 3 — deposit the data, and the manifest alongside it
+## Step 3 — give the manifest its digest name
+
+A manifest is named after the digest of its own content (spec §1.1), so the name can
+only be assigned once the bytes are final: write, hash, rename.
+
+```bash
+cd .chiro/manifests
+D=$(chiro ref tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
+mv tmp.chiro.json "$D.chiro.json"
+
+md5sum "$D.chiro.json"     # the name is now checkable with no tooling
+# 22fe1ab2c4a307849fad2cc98eea37dd  22fe1ab2c4a307849fad2cc98eea37dd.chiro.json
+```
+
+From here the file is **immutable**. Reformatting or editing it invalidates its own
+name, and any `chiro://` reference to it. If something needs changing, regenerate and
+rename again rather than editing in place.
+
+Two reasons this matters more than the loss of a legible filename. It means a second
+observation of the same accession can coexist with the first instead of overwriting it
+— which is the whole basis of drift detection. And it means the manifest verifies
+itself: no Chirograph install required, now or in ten years. The full argument is
+[`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
+
+---
+
+## Step 4 — deposit the data, and the manifest alongside it
 
 Upload the files. Then upload the manifest too, if the archive allows arbitrary files.
 
 Depositing the manifest is a courtesy to consumers who will never use Chirograph: it
-gives them per-file checksums the archive itself may not expose. Name it after the
-accession (`GSE000000.chiro.json`) rather than generically, so it remains unambiguous
-sitting in a flat directory next to other records' files.
+gives them per-file checksums the archive itself may not expose — and for GEO, which
+publishes none at all, it is the only per-file checksum a consumer can get.
+
+**This is the one case where an accession-derived name is better.** A deposit is
+browsed by humans who cannot read a digest, and the manifest may be downloaded into a
+directory alongside other records' files. So deposit the copy as
+`GSE000000.chiro.json` even though your repository holds it under its digest name.
+The two files are byte-identical; only the label differs, and `chiro ref` on either
+gives the same reference.
 
 ---
 
-## Step 4 — check that the deposit matches your workspace
+## Step 5 — check that the deposit matches your workspace
 
 This is the step that makes the whole exercise worth doing.
 
 Download the deposit back — the real files, from the real archive, the way a stranger
-would — and verify them against the manifest you wrote in step 1:
+would — and verify them against the manifest you wrote in steps 1-3:
 
 ```bash
 # Fetch the deposit into a scratch directory
 mkdir -p /scratch/$PROJECT/$USER/deposit-check
 # ... download GSE000000's supplementary files there ...
 
-chiro verify .chiro/manifests/GSE000000.chiro.json \
+chiro verify .chiro/manifests/$D.chiro.json \
     --root /scratch/$PROJECT/$USER/deposit-check \
     --source-layout \
     --strict
@@ -130,10 +169,10 @@ this document opens by warning about.
 
 ---
 
-## Step 5 — commit
+## Step 6 — commit
 
 ```bash
-git add .chiro/manifests/GSE000000.chiro.json
+git add .chiro/manifests/
 git commit -m "Add manifest for GSE000000 deposit, verified against archive"
 ```
 
@@ -152,7 +191,7 @@ and re-users care about.
 It does not claim that you are who you say you are. Nothing in the format proves
 authorship — that comes from the accession being under your control and the manifest
 being in a repository with your commit history, not from the manifest itself. See
-[`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
+[`chiro-format-rationale.md`](chiro-format-rationale.md) §14.
 
 ---
 

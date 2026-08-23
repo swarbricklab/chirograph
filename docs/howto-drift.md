@@ -25,11 +25,11 @@ Re-observe, and diff against what you recorded:
 ```bash
 # Re-fetch the upstream data to a scratch directory, then:
 chiro capture /scratch/$PROJECT/$USER/recheck \
-    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/' \
+    --source-url 'geo://GSE111111' \
     --accession GSE111111 \
-    -o /tmp/GSE111111-today.chiro.json
+    -o "$SCRATCH/tmp.chiro.json"
 
-chiro diff .chiro/manifests/GSE111111.chiro.json /tmp/GSE111111-today.chiro.json
+chiro diff .chiro/manifests/<digest>.chiro.json "$SCRATCH/tmp.chiro.json"
 ```
 
 `chiro diff --exit-code` makes this a CI gate: non-zero when the observations differ.
@@ -41,7 +41,7 @@ that cost when nothing has changed.
 If the data is already on disk, the cheaper equivalent is simply:
 
 ```bash
-chiro verify .chiro/manifests/GSE111111.chiro.json --sample 100
+chiro verify .chiro/manifests/<digest>.chiro.json --sample 100
 ```
 
 though that tells you your *copy* is intact, not that the upstream still agrees with it.
@@ -141,7 +141,7 @@ not *"up to date"*. The only real answer is §1's re-observe-and-diff.
 Decide whether to move. Nothing forces you to.
 
 ```bash
-chiro diff .chiro/manifests/GSE111111.chiro.json /tmp/GSE111111-today.chiro.json
+chiro diff .chiro/manifests/<digest>.chiro.json "$SCRATCH/tmp.chiro.json"
 ```
 
 If the change is irrelevant to your analysis, record the observation and keep using the
@@ -149,11 +149,12 @@ old data — but make sure the committed manifest still describes the data your 
 came from. If you adopt the new data, commit the new manifest and rerun what depends on
 it.
 
-**Keep both observations.** Two dated observations of one accession are a drift record,
-and it is the only evidence that the record changed. Note that today `chiro capture`
-names its output from the accession, so capturing twice **overwrites the first
-manifest** — pass an explicit `-o` with a distinguishing name, or content-addressed
-names as described in [`resolution-and-config.md`](resolution-and-config.md) §6.
+**Keep both observations.** Two dated observations of one accession are a drift
+record, and it is the only evidence that the record changed. Digest-based filenames
+(spec §1.1) make this automatic: two observations differ in content, so they get
+different names and coexist. This is the main reason the convention exists — under
+accession-derived naming the second capture silently overwrites the first, destroying
+exactly the record you wanted.
 
 ### Post-publication
 
@@ -164,7 +165,7 @@ What you do is report: the archive changed a record after publication, and here 
 exactly what changed.
 
 ```bash
-chiro diff published/GSE111111.chiro.json today/GSE111111.chiro.json --json
+chiro diff published/<digest>.chiro.json today/<digest>.chiro.json --json
 ```
 
 This is the case that motivated the whole format. A GEO record can be silently
@@ -186,7 +187,7 @@ status=0
 for m in .chiro/manifests/*.chiro.json; do
     [[ $(chiro info --json "$m" | jq -r .provenance_type) == observed-download ]] || continue
     # ... re-fetch to $tmp per the manifest's source_url ...
-    chiro diff "$m" "$tmp/today.chiro.json" --exit-code || status=1
+    chiro diff "$m" "$tmp/tmp.chiro.json" --exit-code || status=1
 done
 exit $status
 ```

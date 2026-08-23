@@ -13,10 +13,13 @@ Chirograph manifests without re-reading terabytes.
 ## The short version
 
 ```bash
-chiro write --from-dvc-cache data/reference.dvc -o .chiro/manifests/reference.chiro.json
+chiro write --from-dvc-cache data/reference.dvc -o .chiro/manifests/tmp.chiro.json
+D=$(chiro ref .chiro/manifests/tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
+mv .chiro/manifests/tmp.chiro.json ".chiro/manifests/$D.chiro.json"
 ```
 
-DVC has already computed the md5 of every file. `--from-dvc-cache` transcribes them.
+Manifests are named after the digest of their own content (spec §1.1), which is why
+the name is assigned after writing. DVC has already computed the md5 of every file. `--from-dvc-cache` transcribes them.
 The only thing it has to look up is file *sizes*, because a DVC `.dir` object does not
 record them — it `stat`s the content-addressed cache object, falling back to the
 workspace copy.
@@ -37,8 +40,8 @@ extension fields is valid input to DVC's own `Tree.from_list`.
 ## What to expect
 
 ```bash
-chiro write --from-dvc-cache data/reference.dvc -o .chiro/manifests/reference.chiro.json
-chiro info .chiro/manifests/reference.chiro.json
+chiro write --from-dvc-cache data/reference.dvc -o .chiro/manifests/tmp.chiro.json
+chiro info .chiro/manifests/tmp.chiro.json
 ```
 
 The manifest defaults to `self-deposited`, which is usually right for data your DVC repo
@@ -50,7 +53,7 @@ chiro write --from-dvc-cache data/reference.dvc \
     --provenance observed-download \
     --source-url 'https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/' \
     --retrieved 2026-03-14T00:00:00Z \
-    -o .chiro/manifests/gencode-v44.chiro.json
+    -o .chiro/manifests/tmp.chiro.json
 ```
 
 Use the date you actually downloaded it, not today. The whole point of `retrieved` is
@@ -64,7 +67,7 @@ If the cache is not in the default location:
 
 ```bash
 chiro write --from-dvc-cache data/reference.dvc --cache-dir /scratch/$PROJECT/dvc-cache \
-    -o .chiro/manifests/reference.chiro.json
+    -o .chiro/manifests/tmp.chiro.json
 ```
 
 Both DVC cache layouts are handled: 3.x (`cache/files/md5/ab/cdef…`) and 2.x
@@ -99,7 +102,7 @@ Verify the manifest against the workspace. This *does* read the data, and that i
 point — it confirms the transcribed digests actually describe the bytes:
 
 ```bash
-chiro verify .chiro/manifests/reference.chiro.json --root data/reference
+chiro verify ".chiro/manifests/$D.chiro.json" --root data/reference
 ```
 
 Worth doing once per repository when you adopt. After that the manifest is checked the
@@ -112,7 +115,7 @@ same way as any other.
 For confirming a manifest against DVC's own logic:
 
 ```bash
-chiro dvc-dir .chiro/manifests/reference.chiro.json --hash-only
+chiro dvc-dir ".chiro/manifests/$D.chiro.json" --hash-only
 ```
 
 That value is what a `.dvc` records as `md5: <hash>.dir`. Note it is **not**

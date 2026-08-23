@@ -19,13 +19,40 @@ RFC 2119 sense.
 
 ## 1. File identity
 
-### 1.1 Extension
+### 1.1 Filename
 
-A manifest file **SHOULD** be named with the double extension `.chiro.json`.
+A manifest **SHOULD** be named:
 
-Where a deposition target rejects double-dotted filenames, the file **MAY** be named
-`.json`. The `schema` field (§3.1) is then the identifying marker, and a reader
-**MUST NOT** rely on the filename to determine that a document is a manifest.
+```
+<digest>.chiro.json
+22fe1ab2c4a307849fad2cc98eea37dd.chiro.json
+```
+
+where `<digest>` is the lowercase hex digest of the manifest's **entire file
+content**, under the algorithm named by its own `hash_algorithm` field. This is the
+same value that a `chiro://` reference to the manifest carries (§6).
+
+- Where a filename carries a digest, that digest **MUST** be the whole-file digest,
+  so that the filename and any `chiro://` reference to the file agree. A filename
+  carrying the canonical-document digest, or any other value, is non-conforming.
+- A manifest **MAY** instead be named after the record it describes
+  (`GSE000000.chiro.json`) in the one case where a human browses the directory
+  directly: a deposit that will be read by consumers who do not use Chirograph.
+- Where a deposition target rejects double-dotted filenames, `.json` **MAY** be used.
+- A reader **MUST NOT** infer a manifest's content from its filename, and **MUST
+  NOT** rely on the filename to determine that a document is a manifest. The
+  `schema` field (§3.1) is the identifying marker.
+
+A digest-named manifest is verifiable with no Chirograph tooling at all:
+
+```console
+$ md5sum *.chiro.json
+22fe1ab2c4a307849fad2cc98eea37dd  22fe1ab2c4a307849fad2cc98eea37dd.chiro.json
+```
+
+Because the name is a function of the content, a digest-named manifest **MUST** be
+treated as immutable: editing or reformatting it invalidates its own name. See
+[`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
 
 ### 1.2 Content type
 

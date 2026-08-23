@@ -1,7 +1,10 @@
 # Ideas & extensions
 
+> **Status: aspirational — nothing here is built.** Commands and flags named in this
+> document are proposals, not features. Do not treat it as documentation.
+
 Things worth doing that are **out of scope for the current plan**, recorded while
-implementing it. Nothing here has been built. Ordered by (my estimate of)
+implementing it. Ordered by (my estimate of)
 value-per-effort within each section.
 
 Decisions actually taken are in [`decisions.md`](decisions.md); this file is

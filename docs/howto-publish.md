@@ -165,7 +165,7 @@ changed.
 drift detection, not authenticity — nothing in a manifest proves who wrote it. The
 authenticity comes from the accession being under your control and the repository
 carrying your commit history. See
-[`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
+[`chiro-format-rationale.md`](chiro-format-rationale.md) §14.
 
 ---
 

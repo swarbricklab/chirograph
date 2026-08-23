@@ -27,14 +27,28 @@ mkdir -p .chiro/manifests
 chiro capture ./data/reference/gencode-v44 \
     --source-url 'https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/' \
     --accession gencode-v44 \
-    -o .chiro/manifests/gencode-v44.chiro.json
+    -o .chiro/manifests/tmp.chiro.json
 
-# 3. Commit it.
-git add .chiro/manifests/gencode-v44.chiro.json && git commit -m "Pin GENCODE v44"
+# 3. Name it after its own digest, and commit it.
+cd .chiro/manifests
+D=$(chiro ref tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
+mv tmp.chiro.json "$D.chiro.json"
+git add "$D.chiro.json" && git commit -m "Pin GENCODE v44"
 ```
 
 That's the whole thing. The manifest is a few kilobytes of text and it is now the
 record of what you used.
+
+Two details in there that matter:
+
+**The manifest is named after the digest of its own content** (spec §1.1), so it can
+only be named after it is written — hence the `mv`. That name makes the file
+self-verifying with `md5sum` alone, and it means a later re-observation of the same
+data coexists with this one instead of overwriting it, which is what makes drift
+detection possible. See [`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
+
+**GENCODE is addressed by its plain URL** because no archivefs backend exists for the
+EBI FTP site. Where a backend does exist, use its scheme instead — see below.
 
 ---
 
@@ -69,10 +83,24 @@ provider's release process, not by your analysis:
 
 ```bash
 chiro capture ./deposit \
-    --source-url 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/' \
+    --source-url 'geo://GSE111111' \
     --accession GSE111111 \
     --relpath-from-source '^GSE111111_([^_]+)_(.*)$=>\1/\2' \
-    -o .chiro/manifests/GSE111111.chiro.json
+    -o .chiro/manifests/tmp.chiro.json
+```
+
+Note the source URL: `geo://GSE111111`, not the FTP path. The archive scheme is what
+`archivefs` resolves, so the manifest survives NCBI reorganising its directory layout
+— and GEO's `GSE111nnn` path sharding is exactly the sort of thing that changes.
+Available schemes are `geo://`, `zenodo://`, `ega://`, `bia://` and `dbgap://`.
+
+A resolved fetch location looks like this, which you can check before fetching
+anything:
+
+```console
+$ chiro ls --urls .chiro/manifests/tmp.chiro.json
+geo://GSE111111/GSE111111_sampleA_matrix.mtx.gz
+geo://GSE111111/GSE111111_sampleA_barcodes.tsv.gz
 ```
 
 The walked tree is the *source* layout, so each walked path becomes `source_path`, and
@@ -83,7 +111,7 @@ the rule derives `relpath` from it. Here a flat deposit of
 Check the result before committing:
 
 ```bash
-chiro ls .chiro/manifests/GSE111111.chiro.json
+chiro ls .chiro/manifests/tmp.chiro.json
 ```
 
 Two reasons to care:
@@ -100,7 +128,7 @@ Two reasons to care:
 ## Verifying what you fetched
 
 ```bash
-chiro verify .chiro/manifests/gencode-v44.chiro.json --root ./data/reference/gencode-v44
+chiro verify ".chiro/manifests/$D.chiro.json" --root ./data/reference/gencode-v44
 ```
 
 Exit code `0` means the bytes match. `1` means a finding. `2` means the tool could not
