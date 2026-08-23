@@ -21,7 +21,7 @@ For consumers (the ``archivefs`` integration surface), the three things you want
 are :func:`load`, :meth:`Manifest.fetch_plan`, and :func:`verify_entry`::
 
     manifest = chirograph.load(path)              # validates Layers 2 + schema
-    for item in manifest.fetch_plan():            # spec §9 fetch resolution
+    for item in manifest.fetch_plan():            # fetch resolution (rationale §11)
         fetch(item.url) -> place at item.relpath  # then check against item.md5
 
 Nothing here needs a network, a registry, or DVC. See ``docs/`` for the format

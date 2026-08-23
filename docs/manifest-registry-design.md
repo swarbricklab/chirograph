@@ -483,7 +483,7 @@ foundation.
 > - **§2's whole-file addressing has a reformatting hazard.** A whole-file hash is a
 >   hash of *bytes*, so re-indenting a manifest changes its `chiro://` reference
 >   without changing a single fact it asserts — and manifests are meant to live in
->   Git (spec §7), where editors and pre-commit hooks reformat JSON routinely. In a
+>   Git (howto-publish), where editors and pre-commit hooks reformat JSON routinely. In a
 >   registry keyed on that hash, a reformat silently relocates the object. A
 >   reformat-invariant alternative (a hash over the manifest's *canonical document*
 >   form) is implemented as `chiro ref --canonical`; choosing between them is a

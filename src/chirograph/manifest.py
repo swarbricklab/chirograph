@@ -274,7 +274,7 @@ class FetchItem:
     """One unit of work for a consumer materialising a manifest.
 
     The reason :meth:`Manifest.fetch_plan` exists: ``archivefs`` should not have
-    to re-derive spec §9's fetch-location rule (or rediscover the ``urljoin``
+    to re-derive the fetch-location rule (rationale §11) (or rediscover the ``urljoin``
     trailing-slash trap in :func:`chirograph.paths.join_source_url`).
     """
 
@@ -392,7 +392,7 @@ class Manifest:
         return join_source_url(self.source_url, entry.source)
 
     def fetch_plan(self) -> list[FetchItem]:
-        """Everything a consumer needs to fetch and place each file (spec §9)."""
+        """Everything a consumer needs to fetch and place each file (rationale §11)."""
         return [
             FetchItem(
                 source=entry.source,
@@ -525,7 +525,7 @@ class Manifest:
         """Render to JSON text, with a trailing newline.
 
         Pretty-printed by default because manifests are shared through Git
-        (spec §7) and a one-line array diffs uselessly. The exact serialisation
+        (howto-publish) and a one-line array diffs uselessly. The exact serialisation
         is fixed — ``indent=2``, format field order, ``ensure_ascii=False``,
         trailing newline — so that the whole-file hash of a manifest written by
         this library is reproducible. See docs/decisions.md D-09 for why that is

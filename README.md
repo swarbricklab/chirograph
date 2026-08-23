@@ -17,11 +17,11 @@ place. Chirograph adds the missing rigor as a thin layer *on top of* whichever
 repository the data must live in:
 
 - **Retrievable checksums** where the repository withholds them.
-- **Immutable, content-addressed references** (`chiro://<hash>`) where the repository
+- **Immutable, content-addressed references** (`chiro://<hash>`) for cases where the source repository
   offers no versioning — the manifest freezes a dataset snapshot even if the upstream
   mutates.
 - **Provenance** distinguishing "this is what I published" (`self-deposited`) from
-  "this is what I downloaded on date D" (`observed-download`).
+  "this is what I downloaded on this date" (`observed-download`).
 
 ## Install
 
@@ -52,7 +52,7 @@ chiro write ./deposit --accession GSE000000 -o GSE000000.chiro.json
 ```
 
 Capture a dataset you downloaded, reorganising a flat deposit into a tidy workspace
-tree as you go (one rule does the whole spec §8.1 example):
+tree as you go (one rule does the whole worked example in docs/howto-reference-data.md):
 
 ```bash
 chiro capture ./deposit \
@@ -102,7 +102,7 @@ chiro validate <(curl -sL https://example.org/GSE000000.chiro.json)
 import chirograph
 
 manifest = chirograph.load("GSE000000.chiro.json")  # validates schema + Layer 2
-for item in manifest.fetch_plan():  # spec §9 fetch resolution
+for item in manifest.fetch_plan():  # fetch resolution; see docs/chiro-format-rationale.md §11
     ...  # fetch item.url, place at item.relpath, check against item.md5
 
 # Check bytes. `use_source_layout=True` looks for files where they sit in the
@@ -141,10 +141,23 @@ can be diffed rather than guessed at.
 deliberately deferred — an in-repo manifest already does most of the job, and the
 registry is an optimisation over that baseline rather than a prerequisite.
 
-- **Format spec:** [`docs/chiro-format-spec.md`](docs/chiro-format-spec.md)
-- **Manifest registry design:** [`docs/manifest-registry-design.md`](docs/manifest-registry-design.md)
+### How-to
+
+1. [Include public reference data in a project](docs/howto-reference-data.md)
+2. [Include data you are depositing](docs/howto-deposit-data.md) — and check the deposit matches your workspace
+3. [Pull tracked data, and verify it](docs/howto-pull-and-verify.md) — including what a failure means
+4. [Publish data and code together](docs/howto-publish.md)
+5. [Detect that upstream data has changed](docs/howto-drift.md)
+6. [Adopt Chirograph in a repo that already uses DVC](docs/howto-adopt-dvc.md)
+
+### Reference
+
+- **Format spec (normative):** [`docs/chiro-format-spec.md`](docs/chiro-format-spec.md)
+- **Why the format is this way:** [`docs/chiro-format-rationale.md`](docs/chiro-format-rationale.md)
+- **`chiro://` resolution and config:** [`docs/resolution-and-config.md`](docs/resolution-and-config.md) *(design, largely unbuilt)*
+- **Manifest registry design:** [`docs/manifest-registry-design.md`](docs/manifest-registry-design.md) *(design, deferred)*
 - **Implementation plan / status:** [`docs/plan.md`](docs/plan.md)
-- **Decisions taken while implementing:** [`docs/decisions.md`](docs/decisions.md)
+- **Decisions taken while implementing:** [`docs/decisions.md`](docs/decisions.md) — dated record; its spec section numbers refer to spec v0.3, before the split
 - **Ideas & extensions (not built):** [`docs/ideas.md`](docs/ideas.md)
 
 > Two claims in the spec about DVC `.dir` equivalence were disproved by checking them
@@ -160,10 +173,3 @@ registry is an optimisation over that baseline rather than a prerequisite.
   by DVC. `archivefs` *optionally* reads Chirograph manifests to gain download-free
   checksums and friendly workspace layout, but works without them. Chirograph is the
   manifest format; `archivefs` is the data-access layer.
-
-## Naming
-
-Retired working names: `xdir` (invisible etymology, collided with directory-listing
-tools), `tessera` and `bulla` (both taken — `bulla` by a conceptually adjacent
-agent-receipt tool). The technical token is `chiro`: files `.chiro.json`, references
-`chiro://…`, CLI `chirograph` (alias `chiro`).

@@ -47,7 +47,7 @@ expects `spatial/` to exist). A `directories` array, or a zero-byte `.keep`
 convention, would fix it. Both are ugly; wait for a real case.
 
 ### 1.5 JSON-Lines variant
-Already deferred in spec §10 pending >~10⁵ files. One observation from
+Already deferred (rationale §12) pending >~10⁵ files. One observation from
 implementing: the canonicalisation is *already* per-entry — the canonical form is
 `[` + entries joined by `,` + `]`. So a JSONL body's `body_hash` could be defined
 as the hash of the same byte stream, keeping one canonicalisation rule for both
@@ -196,7 +196,7 @@ quadratic. At n = 64 000 the whole round trip is ≈7 s, of which the JSON *load
 is ≈3.7 s and dominates.
 
 Measured directly at 10⁵ entries afterwards: `load()` takes ≈6.8 s, of which the
-JSON parse dominates. That supports spec §10's ">~10⁵ files" threshold for the
+JSON parse dominates. That supports rationale §12's ">~10⁵ files" threshold for the
 JSON-Lines variant, and says that when it starts to hurt it will be **parse** time
 rather than our canonicalisation. Worth re-measuring on a real deposit before
 acting on it.

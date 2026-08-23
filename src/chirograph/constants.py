@@ -76,7 +76,7 @@ PROVENANCE_TYPES: Final[tuple[str, ...]] = (PROVENANCE_SELF, PROVENANCE_OBSERVED
 #: Header field order used when serialising. Purely cosmetic — canonicalisation
 #: (and therefore ``body_hash``) is independent of key order — but a stable
 #: order makes manifests diff cleanly in Git, which is how they are shared
-#: (spec §7).
+#: (see docs/howto-publish.md).
 HEADER_FIELD_ORDER: Final[tuple[str, ...]] = (
     "schema",
     "schema_version",

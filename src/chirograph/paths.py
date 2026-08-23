@@ -225,7 +225,7 @@ def lint_paths(paths: Iterable[str]) -> list[PathWarning]:
 def join_source_url(source_url: str, source: str) -> str:
     """Resolve one entry's fetch URL from ``source_url`` and its source path.
 
-    Implements spec §9 "Resolving a fetch location". Deliberately does **not** use
+    Implements the fetch-location rule (rationale §11). Deliberately does **not** use
     :func:`urllib.parse.urljoin`, which gets this wrong in three separate ways
     for the URLs this format actually carries:
 
@@ -249,7 +249,7 @@ def join_source_url(source_url: str, source: str) -> str:
     of the request rather than part of the location, which is the only reading
     that keeps an API-style base usable.
 
-    *source* is validated first, because this is exported as the spec §9 helper
+    *source* is validated first, because this is exported as the public fetch helper
     and a caller may reach it without going through a manifest.
     """
     from urllib.parse import quote, urlsplit, urlunsplit

@@ -3,8 +3,11 @@
 High-level checklist for the Chirograph format, library, and (deferred) registry.
 Detail lives in the design docs — this file links rather than repeats.
 
-- **Format:** [`chiro-format-spec.md`](chiro-format-spec.md)
+- **Format (normative):** [`chiro-format-spec.md`](chiro-format-spec.md)
+- **Format rationale:** [`chiro-format-rationale.md`](chiro-format-rationale.md)
+- **`chiro://` resolution & config:** [`resolution-and-config.md`](resolution-and-config.md)
 - **Registry design:** [`manifest-registry-design.md`](manifest-registry-design.md)
+- **How-to guides:** `howto-reference-data`, `howto-deposit-data`, `howto-pull-and-verify`, `howto-publish`, `howto-drift`, `howto-adopt-dvc`
 - **Decisions taken while implementing:** [`decisions.md`](decisions.md)
 - **Ideas & extensions (not built):** [`ideas.md`](ideas.md)
 - **Sibling project (data access):** [`archivefs`](https://github.com/swarbricklab/archivefs)
@@ -33,7 +36,7 @@ section of the archivefs plan for why these are separate repos.
       else** (decisions D-03)
 - [x] Decide ETag handling for observed HTTP/S3 sources → **`hash_algorithm:
       "etag"` rejected in v1; per-entry non-authoritative `etag` field added
-      instead** (spec §6.1, decisions D-04)
+      instead** (rationale §7, decisions D-04)
 - [x] Publish a JSON Schema for `.chiro.json` — `chiro schema`; note it cannot
       express the integrity constraints, only the shape
 
