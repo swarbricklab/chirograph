@@ -239,8 +239,13 @@ def test_name_by_digest_defaults_to_cwd(tree: Path, tmp_path: Path, monkeypatch,
 def test_name_by_digest_is_idempotent_when_content_is_pinned(tree, tmp_path, capsys) -> None:
     outdir = tmp_path / "m"
     common = (
-        "write", str(tree), "--created", "2026-09-04T00:00:00Z",
-        "--name-by-digest", "-o", str(outdir),
+        "write",
+        str(tree),
+        "--created",
+        "2026-09-04T00:00:00Z",
+        "--name-by-digest",
+        "-o",
+        str(outdir),
     )
     assert run(capsys, *common)[0] == EXIT_OK
     assert run(capsys, *common)[0] == EXIT_OK  # same bytes -> same name, no clobber error
@@ -249,10 +254,32 @@ def test_name_by_digest_is_idempotent_when_content_is_pinned(tree, tmp_path, cap
 
 def test_name_by_digest_distinct_observations_coexist(tree, tmp_path, capsys) -> None:
     outdir = tmp_path / "m"
-    assert run(capsys, "write", str(tree), "--created", "2026-01-01T00:00:00Z",
-               "--name-by-digest", "-o", str(outdir))[0] == EXIT_OK
-    assert run(capsys, "write", str(tree), "--created", "2026-02-02T00:00:00Z",
-               "--name-by-digest", "-o", str(outdir))[0] == EXIT_OK
+    assert (
+        run(
+            capsys,
+            "write",
+            str(tree),
+            "--created",
+            "2026-01-01T00:00:00Z",
+            "--name-by-digest",
+            "-o",
+            str(outdir),
+        )[0]
+        == EXIT_OK
+    )
+    assert (
+        run(
+            capsys,
+            "write",
+            str(tree),
+            "--created",
+            "2026-02-02T00:00:00Z",
+            "--name-by-digest",
+            "-o",
+            str(outdir),
+        )[0]
+        == EXIT_OK
+    )
     assert len(list(outdir.glob("*.chiro.json"))) == 2  # different created -> both kept
 
 
