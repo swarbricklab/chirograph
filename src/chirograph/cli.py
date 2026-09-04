@@ -202,6 +202,27 @@ def _add_output_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="do the work and report, but write nothing",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "overwrite the output file if it already exists (default: refuse). "
+            "A manifest is often a drift snapshot, so overwriting one can destroy "
+            "the record it exists to keep."
+        ),
+    )
+
+
+def _add_allow_empty(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help=(
+            "write a manifest even if no files were found (default: refuse). "
+            "An empty manifest usually means the default excludes dropped "
+            "everything — e.g. a directory of *.chiro.json files."
+        ),
+    )
 
 
 def _add_header_flags(parser: argparse.ArgumentParser) -> None:
@@ -329,6 +350,7 @@ def _add_write(subparsers: Any) -> None:
         help="when cache and workspace disagree on a size, believe the workspace",
     )
     _add_output_flags(parser)
+    _add_allow_empty(parser)
     parser.set_defaults(func=cmd_write)
 
 
@@ -359,6 +381,7 @@ def _add_capture(subparsers: Any) -> None:
     )
     _add_walk_flags(parser)
     _add_output_flags(parser)
+    _add_allow_empty(parser)
     parser.set_defaults(func=cmd_capture)
 
 
@@ -606,6 +629,22 @@ def _excludes_for(args: argparse.Namespace) -> list[str] | None:
     return [*DEFAULT_EXCLUDES, *args.exclude]
 
 
+def _guard_no_clobber(target: Path, force: bool) -> None:
+    """Refuse to overwrite an existing manifest unless ``--force``.
+
+    Raises :class:`FileExistsError`, which the top-level handler maps to exit 2
+    (the tool declined to run) rather than 1 (a finding). Manifests are often
+    drift snapshots, and content-addressed names (spec §1.1) let successive
+    observations of one accession coexist instead of clobbering.
+    """
+    if target.exists() and not force:
+        raise FileExistsError(
+            f"{target} already exists; refusing to overwrite (use --force). "
+            "If this is a new observation, give it its own name — content-addressed "
+            "names (spec §1.1) keep successive snapshots from colliding."
+        )
+
+
 def _write_output(manifest: Manifest, args: argparse.Namespace, out: TextIO) -> Path | None:
     indent = args.indent if args.indent > 0 else None
     if args.dry_run:
@@ -614,6 +653,7 @@ def _write_output(manifest: Manifest, args: argparse.Namespace, out: TextIO) -> 
         out.write(manifest.to_json(indent=indent))
         return None
     target = Path(args.output) if args.output else Path(manifest.default_filename())
+    _guard_no_clobber(target, args.force)
     manifest.dump(target, indent=indent)
     return target
 
@@ -651,10 +691,37 @@ def _report_build(result: Any, target: Path | None, args: argparse.Namespace, er
         err.write("\n".join(lines) + "\n")
 
 
+def _finalize_build(result: Any, args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    """Guard, write, and report a freshly built manifest. Shared by write/capture.
+
+    Refuses to write an empty (zero-file) manifest unless ``--allow-empty``: such a
+    manifest verifies clean and attests nothing, so emitting one silently is a
+    booby trap. The commonest cause is the default excludes removing every
+    candidate — e.g. running ``chiro write`` over a directory of ``*.chiro.json``.
+    ``--dry-run`` writes nothing, so it only reports (the summary's "0 file(s)"
+    makes the emptiness visible); the guard is a write-policy check, like the
+    no-clobber guard, and neither fires when nothing is written.
+    """
+    if result.manifest.nfiles == 0 and not args.allow_empty and not args.dry_run:
+        err.write(
+            "no files to include; refusing to write an empty manifest (use "
+            "--allow-empty). The default excludes drop *.chiro.json, VCS metadata "
+            "and caches — check whether they removed everything.\n"
+        )
+        return EXIT_ERROR
+    target = _write_output(result.manifest, args, out)
+    _report_build(result, target, args, err)
+    return EXIT_OK
+
+
 def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     if bool(args.directory) == bool(args.from_dvc_cache):
         err.write("give either a directory or --from-dvc-cache, not both or neither\n")
         return EXIT_ERROR
+
+    # Refuse an existing output before doing the expensive walk/hash, not after.
+    if args.output and not args.dry_run and not args.stdout:
+        _guard_no_clobber(Path(args.output), args.force)
 
     if args.from_dvc_cache:
         from .dvc import manifest_from_dvc
@@ -681,9 +748,7 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             f"transcribed {result.out.path!r} from {args.from_dvc_cache} without rehashing; "
             f"sizes recovered from: {result.size_source}",
         )
-        target = _write_output(result.manifest, args, out)
-        _report_build(result, target, args, err)
-        return EXIT_OK
+        return _finalize_build(result, args, out, err)
 
     from .writer import build_from_directory
 
@@ -707,13 +772,14 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         progress=progress.files,
     )
     progress.done()
-    target = _write_output(built.manifest, args, out)
-    _report_build(built, target, args, err)
-    return EXIT_OK
+    return _finalize_build(built, args, out, err)
 
 
 def cmd_capture(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     from .writer import capture_from_directory
+
+    if args.output and not args.dry_run and not args.stdout:
+        _guard_no_clobber(Path(args.output), args.force)
 
     progress = _Progress("hashing", not args.stdout)
     result = capture_from_directory(
@@ -734,9 +800,7 @@ def cmd_capture(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         progress=progress.files,
     )
     progress.done()
-    target = _write_output(result.manifest, args, out)
-    _report_build(result, target, args, err)
-    return EXIT_OK
+    return _finalize_build(result, args, out, err)
 
 
 def cmd_verify(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
