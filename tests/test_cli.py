@@ -212,87 +212,66 @@ def test_dry_run_reports_empty_without_failing(tmp_path: Path, capsys) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# --name-by-digest (spec §1.1)
+# Digest naming is the default (spec §1.1). -o ending in .json = exact filename;
+# any other -o = a directory to write <digest>.chiro.json into; no -o = cwd.
 # --------------------------------------------------------------------------- #
 
 
-def test_name_by_digest_filename_equals_reference(tree: Path, tmp_path: Path, capsys) -> None:
-    outdir = tmp_path / "manifests"
-    code, _, _ = run(capsys, "write", str(tree), "--name-by-digest", "-o", str(outdir))
-    assert code == EXIT_OK
-    written = list(outdir.glob("*.chiro.json"))
+def _sole_manifest(directory: Path) -> Path:
+    written = list(directory.glob("*.chiro.json"))
     assert len(written) == 1
-    path = written[0]
+    return written[0]
+
+
+def test_default_names_by_digest_in_cwd(tree, tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    code, _, _ = run(capsys, "write", str(tree))  # no -o at all
+    assert code == EXIT_OK
+    path = _sole_manifest(tmp_path)
     digest = path.name.removesuffix(".chiro.json")
-    # The filename is the whole-file hash, so it equals the chiro:// reference and
-    # is checkable with a plain md5sum.
+    # The default name is the whole-file hash, so it equals the chiro:// reference.
     assert str(ChiroRef.for_path(path, "md5")) == f"chiro://md5:{digest}"
 
 
-def test_name_by_digest_defaults_to_cwd(tree: Path, tmp_path: Path, monkeypatch, capsys) -> None:
-    monkeypatch.chdir(tmp_path)
-    code, _, _ = run(capsys, "write", str(tree), "--name-by-digest")
-    assert code == EXIT_OK
-    assert len(list(tmp_path.glob("*.chiro.json"))) == 1
-
-
-def test_name_by_digest_is_idempotent_when_content_is_pinned(tree, tmp_path, capsys) -> None:
-    outdir = tmp_path / "m"
-    common = (
-        "write",
-        str(tree),
-        "--created",
-        "2026-09-04T00:00:00Z",
-        "--name-by-digest",
-        "-o",
-        str(outdir),
+def test_output_directory_gets_a_digest_name(tree, tmp_path, capsys) -> None:
+    outdir = tmp_path / "manifests"  # no .json suffix -> a directory
+    assert run(capsys, "write", str(tree), "-o", str(outdir))[0] == EXIT_OK
+    path = _sole_manifest(outdir)
+    assert (
+        str(ChiroRef.for_path(path, "md5"))
+        == f"chiro://md5:{path.name.removesuffix('.chiro.json')}"
     )
+
+
+def test_output_ending_in_json_is_an_exact_filename(tree, tmp_path, capsys) -> None:
+    # The escape hatch for a human-readable deposit copy (spec §1.1 exception).
+    for name in ("GSE1.chiro.json", "deposit.json"):
+        target = tmp_path / name
+        assert run(capsys, "write", str(tree), "-o", str(target))[0] == EXIT_OK
+        assert target.exists()
+
+
+def test_digest_naming_is_idempotent_when_content_is_pinned(tree, tmp_path, capsys) -> None:
+    outdir = tmp_path / "m"
+    common = ("write", str(tree), "--created", "2026-09-04T00:00:00Z", "-o", str(outdir))
     assert run(capsys, *common)[0] == EXIT_OK
     assert run(capsys, *common)[0] == EXIT_OK  # same bytes -> same name, no clobber error
     assert len(list(outdir.glob("*.chiro.json"))) == 1
 
 
-def test_name_by_digest_distinct_observations_coexist(tree, tmp_path, capsys) -> None:
+def test_digest_naming_keeps_distinct_observations(tree, tmp_path, capsys) -> None:
     outdir = tmp_path / "m"
-    assert (
-        run(
-            capsys,
-            "write",
-            str(tree),
-            "--created",
-            "2026-01-01T00:00:00Z",
-            "--name-by-digest",
-            "-o",
-            str(outdir),
-        )[0]
-        == EXIT_OK
-    )
-    assert (
-        run(
-            capsys,
-            "write",
-            str(tree),
-            "--created",
-            "2026-02-02T00:00:00Z",
-            "--name-by-digest",
-            "-o",
-            str(outdir),
-        )[0]
-        == EXIT_OK
-    )
+    for created in ("2026-01-01T00:00:00Z", "2026-02-02T00:00:00Z"):
+        assert (
+            run(capsys, "write", str(tree), "--created", created, "-o", str(outdir))[0] == EXIT_OK
+        )
     assert len(list(outdir.glob("*.chiro.json"))) == 2  # different created -> both kept
 
 
-def test_name_by_digest_rejects_stdout(tree: Path, capsys) -> None:
-    code, _, err = run(capsys, "write", str(tree), "--name-by-digest", "--stdout")
-    assert code == EXIT_ERROR
-    assert "stdout" in err
-
-
-def test_name_by_digest_rejects_file_as_output_dir(tree: Path, tmp_path: Path, capsys) -> None:
-    afile = tmp_path / "afile"
+def test_digest_naming_rejects_a_file_as_output_dir(tree, tmp_path, capsys) -> None:
+    afile = tmp_path / "afile"  # exists, is a file, no .json suffix -> treated as a dir
     afile.write_text("x")
-    code, _, err = run(capsys, "write", str(tree), "--name-by-digest", "-o", str(afile))
+    code, _, err = run(capsys, "write", str(tree), "-o", str(afile))
     assert code == EXIT_ERROR
     assert "directory" in err
 

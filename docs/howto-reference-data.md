@@ -26,7 +26,7 @@ curl -O https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/gen
 chiro capture ./data/reference/gencode-v44 \
     --source-url 'https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/' \
     --accession gencode-v44 \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 
 # 3. Commit it.
 git -C .chiro/manifests add . && git commit -m "Pin GENCODE v44"
@@ -37,9 +37,9 @@ record of what you used.
 
 Two details in there that matter:
 
-**The manifest is named after the digest of its own content** (spec §1.1). `--name-by-digest`
-writes `<digest>.chiro.json` into the directory you give `-o`, where the digest is the
-file's own whole-file hash — so the filename *equals* the `chiro://` reference and is
+**The manifest is named after the digest of its own content** (spec §1.1): by default
+`chiro capture`/`write` write `<digest>.chiro.json` into the directory you give `-o`,
+where the digest is the file's own whole-file hash — so the filename *equals* the `chiro://` reference and is
 checkable with `md5sum` alone. It also means a later re-observation of the same data
 coexists with this one instead of overwriting it, which is what makes drift detection
 possible. See [`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
@@ -83,7 +83,7 @@ chiro capture ./deposit \
     --source-url 'geo://GSE111111' \
     --accession GSE111111 \
     --relpath-from-source '^GSE111111_([^_]+)_(.*)$=>\1/\2' \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 # wrote .chiro/manifests/<digest>.chiro.json
 ```
 
