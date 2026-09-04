@@ -33,12 +33,13 @@ failure, while the deposit is still yours to fix.
 chiro write ./data/generated/xenium-panel \
     --accession GSE000000 \
     --source-url 'geo://GSE000000' \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 # wrote .chiro/manifests/<digest>.chiro.json
 ```
 
-`--name-by-digest` writes `<digest>.chiro.json` into the directory you give `-o`,
-naming the file after its own whole-file hash (spec §1.1) — more on why in Step 3.
+With `-o` naming a directory (not a `.json` file), the manifest is written as
+`<digest>.chiro.json` — named after its own whole-file hash (spec §1.1), the default —
+more on why in Step 3.
 
 Use the archive scheme (`geo://GSE000000`), not the underlying FTP path. The scheme is
 what `archivefs` resolves, so the manifest stays valid if NCBI reorganises its
@@ -68,7 +69,7 @@ chiro write ./data/generated/xenium-panel \
     --accession GSE000000 \
     --source-url 'geo://GSE000000' \
     --source-from-relpath '^([^/]+)/(.*)$=>GSE000000_\1_\2' \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 ```
 
 That turns a workspace path `sampleA/matrix.mtx.gz` into a deposit name
@@ -91,8 +92,9 @@ something almost right.
 
 ## Step 3 — the digest name
 
-`--name-by-digest` (Steps 1–2) named the file after the hash of its own content, so
-the filename *equals* its `chiro://` reference and is checkable with no tooling:
+Steps 1–2 named the file after the hash of its own content (the default when `-o` is a
+directory), so the filename *equals* its `chiro://` reference and is checkable with no
+tooling:
 
 ```bash
 md5sum .chiro/manifests/*.chiro.json

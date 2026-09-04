@@ -13,12 +13,13 @@ Chirograph manifests without re-reading terabytes.
 ## The short version
 
 ```bash
-chiro write --from-dvc-cache data/reference.dvc --name-by-digest -o .chiro/manifests
+chiro write --from-dvc-cache data/reference.dvc -o .chiro/manifests
 # wrote .chiro/manifests/<digest>.chiro.json
 ```
 
-`--name-by-digest` names the file `<digest>.chiro.json` after its own whole-file hash
-(spec §1.1). DVC has already computed the md5 of every file, and `--from-dvc-cache`
+With `-o` naming a directory, the file is written as `<digest>.chiro.json`, named after
+its own whole-file hash (spec §1.1, the default). DVC has already computed the md5 of
+every file, and `--from-dvc-cache`
 transcribes them. The only thing it has to look up is file *sizes*, because a DVC
 `.dir` object does not record them — it `stat`s the content-addressed cache object,
 falling back to the workspace copy.
@@ -39,7 +40,7 @@ extension fields is valid input to DVC's own `Tree.from_list`.
 ## What to expect
 
 ```bash
-chiro write --from-dvc-cache data/reference.dvc --name-by-digest -o .chiro/manifests
+chiro write --from-dvc-cache data/reference.dvc -o .chiro/manifests
 chiro info .chiro/manifests/*.chiro.json
 ```
 
@@ -52,7 +53,7 @@ chiro write --from-dvc-cache data/reference.dvc \
     --provenance observed-download \
     --source-url 'https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/' \
     --retrieved 2026-03-14T00:00:00Z \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 ```
 
 Use the date you actually downloaded it, not today. The whole point of `retrieved` is
@@ -66,7 +67,7 @@ If the cache is not in the default location:
 
 ```bash
 chiro write --from-dvc-cache data/reference.dvc --cache-dir /scratch/$PROJECT/dvc-cache \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 ```
 
 Both DVC cache layouts are handled: 3.x (`cache/files/md5/ab/cdef…`) and 2.x

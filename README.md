@@ -48,9 +48,9 @@ pytest && ruff check . && mypy
 Describe a directory you are about to deposit:
 
 ```bash
-# --name-by-digest writes <digest>.chiro.json into the given directory, naming the
-# file after its own whole-file hash (spec §1.1) — so the name is the chiro:// reference.
-chiro write ./deposit --accession GSE000000 --name-by-digest -o .chiro/manifests
+# -o names a directory, so the manifest is written as <digest>.chiro.json — named after
+# its own whole-file hash (spec §1.1, the default) — so the name is the chiro:// reference.
+chiro write ./deposit --accession GSE000000 -o .chiro/manifests
 ```
 
 Capture a dataset you downloaded, reorganising a flat deposit into a tidy workspace
@@ -61,13 +61,13 @@ chiro capture ./deposit \
     --source-url 'geo://GSE000000' \
     --accession GSE000000 \
     --relpath-from-source '^GSE000000_([^_]+)_(.*)$=>\1/\2' \
-    --name-by-digest -o .chiro/manifests
+    -o .chiro/manifests
 ```
 
 Transcribe what DVC has already hashed, without re-reading a byte:
 
 ```bash
-chiro write --from-dvc-cache data.dvc --name-by-digest -o .chiro/manifests
+chiro write --from-dvc-cache data.dvc -o .chiro/manifests
 ```
 
 Check bytes against a manifest, or just the manifest's own integrity:
@@ -82,7 +82,7 @@ Detect that an upstream record has changed under a stable accession (each observ
 gets its own digest name, so they coexist):
 
 ```bash
-chiro capture ./deposit --source-url geo://GSE000000 --name-by-digest -o .chiro/manifests
+chiro capture ./deposit --source-url geo://GSE000000 -o .chiro/manifests
 chiro diff .chiro/manifests/<first-digest>.chiro.json .chiro/manifests/<second-digest>.chiro.json
 ```
 

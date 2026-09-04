@@ -697,11 +697,15 @@ class Manifest:
     # -- naming ------------------------------------------------------------- #
 
     def default_filename(self) -> str:
-        """Preferred filename: accession-derived where possible (spec §6).
+        """Accession-derived filename, for a human-readable deposit copy (spec §1.1).
 
         ``GSE12345.chiro.json`` beats ``manifest.chiro.json`` — unambiguous in a
-        flat deposit and survives being downloaded next to other records'
-        manifests.
+        flat deposit and survives being downloaded next to other records' manifests.
+
+        This is **not** the CLI's default output name: `chiro write`/`capture`
+        default to the content-addressed ``<digest>.chiro.json`` (spec §1.1). This
+        helper produces the legible alternative for the one case that wants it — a
+        deposit browsed by humans who cannot read a digest.
         """
         stem = self.record_accession or "manifest"
         safe = "".join(c if c.isalnum() or c in "-_." else "-" for c in stem).strip("-.")

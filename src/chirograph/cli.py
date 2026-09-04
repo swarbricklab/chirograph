@@ -181,9 +181,12 @@ def _add_output_flags(parser: argparse.ArgumentParser) -> None:
         "--output",
         metavar="PATH",
         help=(
-            "where to write the manifest. Defaults to <accession>.chiro.json in the "
-            "current directory, or manifest.chiro.json without an accession. With "
-            "--name-by-digest, PATH is instead the *directory* to write into."
+            "where to write the manifest. A PATH ending in .json is the exact "
+            "filename; any other PATH is a directory to write <digest>.chiro.json "
+            "into. With no -o, writes <digest>.chiro.json in the current directory. "
+            "The digest name (spec §1.1) equals the chiro:// reference and is "
+            "md5sum-checkable; use an explicit .json filename for a human-readable "
+            "deposit copy (e.g. -o GSE12345.chiro.json)."
         ),
     )
     parser.add_argument(
@@ -211,17 +214,6 @@ def _add_output_flags(parser: argparse.ArgumentParser) -> None:
             "overwrite the output file if it already exists (default: refuse). "
             "A manifest is often a drift snapshot, so overwriting one can destroy "
             "the record it exists to keep."
-        ),
-    )
-    parser.add_argument(
-        "--name-by-digest",
-        action="store_true",
-        help=(
-            "name the manifest <digest>.chiro.json after its own whole-file hash "
-            "(spec §1.1), instead of an accession-derived name. Then -o names the "
-            "directory to write into (default: the current directory). The filename "
-            "equals the chiro:// reference, so successive observations never collide "
-            "and md5sum checks the name."
         ),
     )
 
@@ -658,8 +650,18 @@ def _guard_no_clobber(target: Path, force: bool) -> None:
         )
 
 
-def _write_digest_named(manifest: Manifest, args: argparse.Namespace, indent: int | None) -> Path:
-    """Write ``<digest>.chiro.json`` into the -o directory (spec §1.1).
+def _is_explicit_filename(output: str) -> bool:
+    """Whether an ``-o`` value names an exact file rather than a directory.
+
+    The rule (spec §1.1): a path ending in ``.json`` — ``.chiro.json`` or the bare
+    ``.json`` the deposit caveat allows — is the exact filename the user wants;
+    anything else is a directory to write ``<digest>.chiro.json`` into.
+    """
+    return output.endswith(".json")
+
+
+def _write_digest_named(manifest: Manifest, outdir: Path, indent: int | None) -> Path:
+    """Write ``<digest>.chiro.json`` into *outdir* (spec §1.1) — the default.
 
     The filename is the whole-file hash of the exact bytes written, so it equals
     the ``chiro://`` reference by construction. No clobber guard is needed, because
@@ -671,10 +673,9 @@ def _write_digest_named(manifest: Manifest, args: argparse.Namespace, indent: in
     """
     data = manifest.to_bytes(indent=indent)
     ref = ChiroRef.for_bytes(data, manifest.hash_algorithm)
-    outdir = Path(args.output) if args.output else Path()
     if outdir.exists() and not outdir.is_dir():
         raise NotADirectoryError(
-            f"--name-by-digest writes into a directory, but {outdir} is a file"
+            f"{outdir} is a file; -o must be a directory unless it ends in .json"
         )
     target = outdir / f"{ref.digest}{MANIFEST_SUFFIX}"
     if outdir != Path():
@@ -687,20 +688,20 @@ def _write_digest_named(manifest: Manifest, args: argparse.Namespace, indent: in
 
 def _write_output(manifest: Manifest, args: argparse.Namespace, out: TextIO) -> Path | None:
     indent = args.indent if args.indent > 0 else None
-    name_by_digest = getattr(args, "name_by_digest", False)
-    if name_by_digest and args.stdout:
-        raise ValueError("--name-by-digest names an on-disk file; it cannot be used with --stdout")
     if args.dry_run:
         return None
     if args.stdout:
         out.write(manifest.to_json(indent=indent))
         return None
-    if name_by_digest:
-        return _write_digest_named(manifest, args, indent)
-    target = Path(args.output) if args.output else Path(manifest.default_filename())
-    _guard_no_clobber(target, args.force)
-    manifest.dump(target, indent=indent)
-    return target
+    # An -o ending in .json is an exact filename; otherwise it's a directory and
+    # the manifest is named by its own digest (the default). See _is_explicit_filename.
+    if args.output is not None and _is_explicit_filename(args.output):
+        target = Path(args.output)
+        _guard_no_clobber(target, args.force)
+        manifest.dump(target, indent=indent)
+        return target
+    outdir = Path(args.output) if args.output else Path()
+    return _write_digest_named(manifest, outdir, indent)
 
 
 def _report_build(result: Any, target: Path | None, args: argparse.Namespace, err: TextIO) -> None:
@@ -765,7 +766,7 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         return EXIT_ERROR
 
     # Refuse an existing output before doing the expensive walk/hash, not after.
-    if args.output and not args.dry_run and not args.stdout and not args.name_by_digest:
+    if args.output and _is_explicit_filename(args.output) and not args.dry_run and not args.stdout:
         _guard_no_clobber(Path(args.output), args.force)
 
     if args.from_dvc_cache:
@@ -823,7 +824,7 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 def cmd_capture(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     from .writer import capture_from_directory
 
-    if args.output and not args.dry_run and not args.stdout and not args.name_by_digest:
+    if args.output and _is_explicit_filename(args.output) and not args.dry_run and not args.stdout:
         _guard_no_clobber(Path(args.output), args.force)
 
     progress = _Progress("hashing", not args.stdout)
