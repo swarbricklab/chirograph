@@ -324,10 +324,21 @@ changed without re-downloading it. Each corresponds to one of the "three version
 | `file_version` | entry | The source's per-file change signal, as observed — a per-file mtime, or an ETag where `etag` (§3.2) is not already carrying it. | "file version" |
 
 All three would be **advisory only**. A consumer **MUST NOT** treat an unchanged value
-as evidence that content is unchanged; only a *changed* value is evidence, and only of
-change. They **MUST NOT** be used to verify content — that is what `md5` (§3.2) is for,
-and a consumer **MUST** enforce it themselves, because DVC does not
-([`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §6).
+as evidence that content is unchanged. And the authority of a *changed* value is
+**archive-dependent**:
+
+- Where `record_version` is a genuine version identifier that the archive guarantees
+  immutable (a Zenodo version DOI), a changed value authoritatively means a new version
+  exists.
+- Where it is only a change-*trigger* — a modification time, as GEO and
+  submitted-to-BIA records expose — a changed value means *only* "the record was
+  touched; re-verify", never "the content definitely changed". An mtime bumps on a
+  metadata edit or an identical re-upload just as readily as on a real change.
+
+So a `record_version` diff is a reason to regenerate and compare content hashes, never
+a verdict on the content. These fields **MUST NOT** be used to verify content — that is
+what `md5` (§3.2) is for, and a consumer **MUST** enforce it themselves, because DVC
+does not ([`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §6).
 
 ### The tracker is `concept`, not `source_url`
 
