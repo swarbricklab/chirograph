@@ -15,6 +15,7 @@ import pytest
 
 from chirograph.cli import EXIT_ERROR, EXIT_FINDING, EXIT_OK, main
 from chirograph.manifest import Manifest
+from chirograph.ref import ChiroRef
 
 
 def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
@@ -208,6 +209,65 @@ def test_dry_run_reports_empty_without_failing(tmp_path: Path, capsys) -> None:
     code, _, err = run(capsys, "write", str(d), "--dry-run")
     assert code == EXIT_OK
     assert "0 file(s)" in err
+
+
+# --------------------------------------------------------------------------- #
+# --name-by-digest (spec §1.1)
+# --------------------------------------------------------------------------- #
+
+
+def test_name_by_digest_filename_equals_reference(tree: Path, tmp_path: Path, capsys) -> None:
+    outdir = tmp_path / "manifests"
+    code, _, _ = run(capsys, "write", str(tree), "--name-by-digest", "-o", str(outdir))
+    assert code == EXIT_OK
+    written = list(outdir.glob("*.chiro.json"))
+    assert len(written) == 1
+    path = written[0]
+    digest = path.name.removesuffix(".chiro.json")
+    # The filename is the whole-file hash, so it equals the chiro:// reference and
+    # is checkable with a plain md5sum.
+    assert str(ChiroRef.for_path(path, "md5")) == f"chiro://md5:{digest}"
+
+
+def test_name_by_digest_defaults_to_cwd(tree: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    code, _, _ = run(capsys, "write", str(tree), "--name-by-digest")
+    assert code == EXIT_OK
+    assert len(list(tmp_path.glob("*.chiro.json"))) == 1
+
+
+def test_name_by_digest_is_idempotent_when_content_is_pinned(tree, tmp_path, capsys) -> None:
+    outdir = tmp_path / "m"
+    common = (
+        "write", str(tree), "--created", "2026-09-04T00:00:00Z",
+        "--name-by-digest", "-o", str(outdir),
+    )
+    assert run(capsys, *common)[0] == EXIT_OK
+    assert run(capsys, *common)[0] == EXIT_OK  # same bytes -> same name, no clobber error
+    assert len(list(outdir.glob("*.chiro.json"))) == 1
+
+
+def test_name_by_digest_distinct_observations_coexist(tree, tmp_path, capsys) -> None:
+    outdir = tmp_path / "m"
+    assert run(capsys, "write", str(tree), "--created", "2026-01-01T00:00:00Z",
+               "--name-by-digest", "-o", str(outdir))[0] == EXIT_OK
+    assert run(capsys, "write", str(tree), "--created", "2026-02-02T00:00:00Z",
+               "--name-by-digest", "-o", str(outdir))[0] == EXIT_OK
+    assert len(list(outdir.glob("*.chiro.json"))) == 2  # different created -> both kept
+
+
+def test_name_by_digest_rejects_stdout(tree: Path, capsys) -> None:
+    code, _, err = run(capsys, "write", str(tree), "--name-by-digest", "--stdout")
+    assert code == EXIT_ERROR
+    assert "stdout" in err
+
+
+def test_name_by_digest_rejects_file_as_output_dir(tree: Path, tmp_path: Path, capsys) -> None:
+    afile = tmp_path / "afile"
+    afile.write_text("x")
+    code, _, err = run(capsys, "write", str(tree), "--name-by-digest", "-o", str(afile))
+    assert code == EXIT_ERROR
+    assert "directory" in err
 
 
 def test_capture_requires_source_url(tree: Path, capsys) -> None:

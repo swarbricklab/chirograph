@@ -48,9 +48,9 @@ pytest && ruff check . && mypy
 Describe a directory you are about to deposit:
 
 ```bash
-chiro write ./deposit --accession GSE000000 -o tmp.chiro.json
-D=$(chiro ref tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
-mv tmp.chiro.json "$D.chiro.json"        # manifests are named by their own digest
+# --name-by-digest writes <digest>.chiro.json into the given directory, naming the
+# file after its own whole-file hash (spec §1.1) — so the name is the chiro:// reference.
+chiro write ./deposit --accession GSE000000 --name-by-digest -o .chiro/manifests
 ```
 
 Capture a dataset you downloaded, reorganising a flat deposit into a tidy workspace
@@ -61,28 +61,29 @@ chiro capture ./deposit \
     --source-url 'geo://GSE000000' \
     --accession GSE000000 \
     --relpath-from-source '^GSE000000_([^_]+)_(.*)$=>\1/\2' \
-    -o tmp.chiro.json
+    --name-by-digest -o .chiro/manifests
 ```
 
 Transcribe what DVC has already hashed, without re-reading a byte:
 
 ```bash
-chiro write --from-dvc-cache data.dvc -o tmp.chiro.json
+chiro write --from-dvc-cache data.dvc --name-by-digest -o .chiro/manifests
 ```
 
 Check bytes against a manifest, or just the manifest's own integrity:
 
 ```bash
-chiro verify   "$D.chiro.json" --root ./deposit --source-layout
-chiro validate "$D.chiro.json"                 # reads no data — a registry's Tier-1 gate
-chiro verify   "$D.chiro.json" --sample 100    # bounded-cost spot check
+chiro verify   .chiro/manifests/<digest>.chiro.json --root ./deposit --source-layout
+chiro validate .chiro/manifests/<digest>.chiro.json   # reads no data — a registry's Tier-1 gate
+chiro verify   .chiro/manifests/<digest>.chiro.json --sample 100   # bounded-cost spot check
 ```
 
-Detect that an upstream record has changed under a stable accession:
+Detect that an upstream record has changed under a stable accession (each observation
+gets its own digest name, so they coexist):
 
 ```bash
-chiro capture ./deposit --source-url geo://GSE000000 -o tmp.chiro.json
-chiro diff <first-digest>.chiro.json tmp.chiro.json
+chiro capture ./deposit --source-url geo://GSE000000 --name-by-digest -o .chiro/manifests
+chiro diff .chiro/manifests/<first-digest>.chiro.json .chiro/manifests/<second-digest>.chiro.json
 ```
 
 A manifest never written to disk can be checked by streaming it:
