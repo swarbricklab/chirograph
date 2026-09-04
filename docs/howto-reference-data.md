@@ -22,18 +22,14 @@ upstream change detected.
 # 1. Fetch the data however you normally would.
 curl -O https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/gencode.v44.annotation.gtf.gz
 
-# 2. Record what you got.
-mkdir -p .chiro/manifests
+# 2. Record what you got, named after its own digest.
 chiro capture ./data/reference/gencode-v44 \
     --source-url 'https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/' \
     --accession gencode-v44 \
-    -o .chiro/manifests/tmp.chiro.json
+    --name-by-digest -o .chiro/manifests
 
-# 3. Name it after its own digest, and commit it.
-cd .chiro/manifests
-D=$(chiro ref tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
-mv tmp.chiro.json "$D.chiro.json"
-git add "$D.chiro.json" && git commit -m "Pin GENCODE v44"
+# 3. Commit it.
+git -C .chiro/manifests add . && git commit -m "Pin GENCODE v44"
 ```
 
 That's the whole thing. The manifest is a few kilobytes of text and it is now the
@@ -41,11 +37,12 @@ record of what you used.
 
 Two details in there that matter:
 
-**The manifest is named after the digest of its own content** (spec §1.1), so it can
-only be named after it is written — hence the `mv`. That name makes the file
-self-verifying with `md5sum` alone, and it means a later re-observation of the same
-data coexists with this one instead of overwriting it, which is what makes drift
-detection possible. See [`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
+**The manifest is named after the digest of its own content** (spec §1.1). `--name-by-digest`
+writes `<digest>.chiro.json` into the directory you give `-o`, where the digest is the
+file's own whole-file hash — so the filename *equals* the `chiro://` reference and is
+checkable with `md5sum` alone. It also means a later re-observation of the same data
+coexists with this one instead of overwriting it, which is what makes drift detection
+possible. See [`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
 
 **GENCODE is addressed by its plain URL** because no archivefs backend exists for the
 EBI FTP site. Where a backend does exist, use its scheme instead — see below.
@@ -86,7 +83,8 @@ chiro capture ./deposit \
     --source-url 'geo://GSE111111' \
     --accession GSE111111 \
     --relpath-from-source '^GSE111111_([^_]+)_(.*)$=>\1/\2' \
-    -o .chiro/manifests/tmp.chiro.json
+    --name-by-digest -o .chiro/manifests
+# wrote .chiro/manifests/<digest>.chiro.json
 ```
 
 Note the source URL: `geo://GSE111111`, not the FTP path. The archive scheme is what
@@ -98,7 +96,7 @@ A resolved fetch location looks like this, which you can check before fetching
 anything:
 
 ```console
-$ chiro ls --urls .chiro/manifests/tmp.chiro.json
+$ chiro ls --urls .chiro/manifests/*.chiro.json
 geo://GSE111111/GSE111111_sampleA_matrix.mtx.gz
 geo://GSE111111/GSE111111_sampleA_barcodes.tsv.gz
 ```
@@ -108,10 +106,10 @@ the rule derives `relpath` from it. Here a flat deposit of
 `GSE111111_sampleA_matrix.mtx.gz` becomes a workspace tree of
 `sampleA/matrix.mtx.gz`.
 
-Check the result before committing:
+Check the layout before committing:
 
 ```bash
-chiro ls .chiro/manifests/tmp.chiro.json
+chiro ls .chiro/manifests/*.chiro.json
 ```
 
 Two reasons to care:
@@ -128,7 +126,7 @@ Two reasons to care:
 ## Verifying what you fetched
 
 ```bash
-chiro verify ".chiro/manifests/$D.chiro.json" --root ./data/reference/gencode-v44
+chiro verify .chiro/manifests/*.chiro.json --root ./data/reference/gencode-v44
 ```
 
 Exit code `0` means the bytes match. `1` means a finding. `2` means the tool could not

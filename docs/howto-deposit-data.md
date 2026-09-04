@@ -30,12 +30,15 @@ failure, while the deposit is still yours to fix.
 ## Step 1 — write the manifest from your workspace
 
 ```bash
-mkdir -p .chiro/manifests
 chiro write ./data/generated/xenium-panel \
     --accession GSE000000 \
     --source-url 'geo://GSE000000' \
-    -o .chiro/manifests/tmp.chiro.json
+    --name-by-digest -o .chiro/manifests
+# wrote .chiro/manifests/<digest>.chiro.json
 ```
+
+`--name-by-digest` writes `<digest>.chiro.json` into the directory you give `-o`,
+naming the file after its own whole-file hash (spec §1.1) — more on why in Step 3.
 
 Use the archive scheme (`geo://GSE000000`), not the underlying FTP path. The scheme is
 what `archivefs` resolves, so the manifest stays valid if NCBI reorganises its
@@ -65,7 +68,7 @@ chiro write ./data/generated/xenium-panel \
     --accession GSE000000 \
     --source-url 'geo://GSE000000' \
     --source-from-relpath '^([^/]+)/(.*)$=>GSE000000_\1_\2' \
-    -o .chiro/manifests/tmp.chiro.json
+    --name-by-digest -o .chiro/manifests
 ```
 
 That turns a workspace path `sampleA/matrix.mtx.gz` into a deposit name
@@ -78,7 +81,7 @@ knows where to look and the materialiser knows where to put it.
 Check it before you upload anything:
 
 ```bash
-chiro ls .chiro/manifests/tmp.chiro.json
+chiro ls .chiro/manifests/*.chiro.json
 ```
 
 `chiro ls` shows both paths per entry, which is the only way to catch a regex that did
@@ -86,29 +89,25 @@ something almost right.
 
 ---
 
-## Step 3 — give the manifest its digest name
+## Step 3 — the digest name
 
-A manifest is named after the digest of its own content (spec §1.1), so the name can
-only be assigned once the bytes are final: write, hash, rename.
+`--name-by-digest` (Steps 1–2) named the file after the hash of its own content, so
+the filename *equals* its `chiro://` reference and is checkable with no tooling:
 
 ```bash
-cd .chiro/manifests
-D=$(chiro ref tmp.chiro.json | sed 's|^chiro://[a-z0-9]*:||')
-mv tmp.chiro.json "$D.chiro.json"
-
-md5sum "$D.chiro.json"     # the name is now checkable with no tooling
-# 22fe1ab2c4a307849fad2cc98eea37dd  22fe1ab2c4a307849fad2cc98eea37dd.chiro.json
+md5sum .chiro/manifests/*.chiro.json
+# 22fe1ab2c4a307849fad2cc98eea37dd  .chiro/manifests/22fe1ab2c4a307849fad2cc98eea37dd.chiro.json
 ```
 
 From here the file is **immutable**. Reformatting or editing it invalidates its own
-name, and any `chiro://` reference to it. If something needs changing, regenerate and
-rename again rather than editing in place.
+name, and any `chiro://` reference to it. If something needs changing, regenerate
+rather than editing in place — a fresh write gets a fresh name.
 
-Two reasons this matters more than the loss of a legible filename. It means a second
-observation of the same accession can coexist with the first instead of overwriting it
-— which is the whole basis of drift detection. And it means the manifest verifies
-itself: no Chirograph install required, now or in ten years. The full argument is
-[`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
+Two reasons this matters more than the loss of a legible filename. A second observation
+of the same accession gets a *different* digest, so it coexists with the first instead
+of overwriting it — which is the whole basis of drift detection. And the manifest
+verifies itself: no Chirograph install required, now or in ten years. The full argument
+is [`chiro-format-rationale.md`](chiro-format-rationale.md) §13.
 
 ---
 
@@ -134,14 +133,14 @@ gives the same reference.
 This is the step that makes the whole exercise worth doing.
 
 Download the deposit back — the real files, from the real archive, the way a stranger
-would — and verify them against the manifest you wrote in steps 1-3:
+would — and verify them against the manifest you wrote in steps 1-2:
 
 ```bash
 # Fetch the deposit into a scratch directory
 mkdir -p /scratch/$PROJECT/$USER/deposit-check
 # ... download GSE000000's supplementary files there ...
 
-chiro verify .chiro/manifests/$D.chiro.json \
+chiro verify .chiro/manifests/*.chiro.json \
     --root /scratch/$PROJECT/$USER/deposit-check \
     --source-layout \
     --strict
