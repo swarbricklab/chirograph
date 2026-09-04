@@ -58,30 +58,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install the wheel with no extras
+      - name: Build the wheel
+        # `build` and its deps must NOT pollute the environment the purity check
+        # runs in, so building and checking are deliberately separated: the wheel
+        # is built here, then installed into a fresh venv below. (Doing both in one
+        # env made the check flag `build` itself — the bug this job is meant to catch
+        # for the package, turned on the job's own tooling.)
         run: |
           python -m pip install --upgrade pip build
           python -m build --wheel --outdir dist .
-          pip install dist/*.whl
+      - name: Install the wheel into a clean venv with no extras
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
       - name: Assert nothing but chirograph was installed
         run: |
-          installed=$(pip list --format=freeze | grep -viE '^(chirograph|pip|setuptools|wheel)=' || true)
+          installed=$(/tmp/clean/bin/pip list --format=freeze | grep -viE '^(chirograph|pip|setuptools|wheel)=' || true)
           if [ -n "$installed" ]; then
             echo "unexpected dependencies installed:"; echo "$installed"; exit 1
           fi
       - name: Conformance suite and packaged data files must work from the wheel
         run: |
-          chiro --version
-          chiro test-vectors --check
-          chiro schema > /dev/null
+          /tmp/clean/bin/chiro --version
+          /tmp/clean/bin/chiro test-vectors --check
+          /tmp/clean/bin/chiro schema > /dev/null
       - name: Optional extras must fail with guidance, not a traceback
         run: |
           mkdir -p sample && printf 'hello\n' > sample/a.txt
-          chiro write sample -o m.chiro.json
+          /tmp/clean/bin/chiro write sample -o m.chiro.json
           # Exit 2 = the tool could not run. Exit 1 would mean the manifest is
           # invalid, which would wrongly block a merge (D-16).
           set +e
-          chiro validate m.chiro.json --jsonschema; code=$?
+          /tmp/clean/bin/chiro validate m.chiro.json --jsonschema; code=$?
           set -e
           [ "$code" -eq 2 ] || { echo "expected exit 2 for a missing extra, got $code"; exit 1; }
 
