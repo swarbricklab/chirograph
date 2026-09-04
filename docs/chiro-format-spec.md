@@ -305,23 +305,43 @@ a new version, never as an edit in place.
 
 ## 8. Proposed additions (not part of `1.0`)
 
-> **Status: aspirational.** Nothing in this section is implemented or valid at
-> `schema_version` `1.0`. It is recorded here so that consumers do not invent
-> conflicting spellings for the same concepts. See
-> [`howto-drift.md`](howto-drift.md) for the workflow these serve.
+> **Status: aspirational — DRAFT, under cross-project review.** Nothing in this section
+> is implemented or valid at `schema_version` `1.0`. It is recorded so that consumers
+> do not invent conflicting spellings for the same concepts. The field names here are
+> being reconciled with the sibling `archivefs` project, whose consumer-side analysis
+> is in [`updatability-and-dvc-update.md`](updatability-and-dvc-update.md); until that
+> is settled these names may change. See [`howto-drift.md`](howto-drift.md) for the
+> workflow they serve.
 
-A `1.1` minor would add three scalar fields, for detecting that an upstream record
-has changed without re-downloading it:
+A `1.1` minor would add three scalar fields, for detecting that an upstream record has
+changed without re-downloading it. Each corresponds to one of the "three versions" in
+[`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §4.
 
-| Field | Level | Proposed definition |
-|---|---|---|
-| `concept` | header | Identifier of the *dataset*, as distinct from this observation of it — the mutable pointer to re-resolve when checking for a newer version. Spelled as a CURIE (`geo:GSE12345`, `doi:10.5281/zenodo.7654320`). Not derivable from `record_accession`, because a Zenodo concept DOI is not derivable from a version DOI. |
-| `upstream_modified` | header | The source's own record-level change signal, as observed. |
-| `last_modified` | entry | The source's per-file change signal, as observed. |
+| Field | Level | Proposed definition | archivefs term |
+|---|---|---|---|
+| `concept` | header | Identifier of the *dataset*, as distinct from this observation of it — the mutable pointer to re-resolve when checking for a newer version. A CURIE (`geo:GSE12345`, `doi:10.5281/zenodo.7654320`). Not derivable from `record_accession`, because a Zenodo concept DOI is not derivable from a version DOI. | "source URL (the tracker)", URL-3 |
+| `record_version` | header | The source's record-level version at the observed time, in whatever form the archive exposes it — a modification date, a version DOI, a serial. Compared for change only. | "record version" |
+| `file_version` | entry | The source's per-file change signal, as observed — a per-file mtime, or an ETag where `etag` (§3.2) is not already carrying it. | "file version" |
 
-All three would be **advisory only**. A consumer **MUST NOT** treat an unchanged
-value as evidence that content is unchanged; only a *changed* value is evidence, and
-only of change. They **MUST NOT** be used to verify content.
+All three would be **advisory only**. A consumer **MUST NOT** treat an unchanged value
+as evidence that content is unchanged; only a *changed* value is evidence, and only of
+change. They **MUST NOT** be used to verify content — that is what `md5` (§3.2) is for,
+and a consumer **MUST** enforce it themselves, because DVC does not
+([`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §6).
 
-Because all three are scalars, and `concept` and `upstream_modified` are header
+### The tracker is `concept`, not `source_url`
+
+`source_url` (§3.1) is the **fetch base** — where the observed bytes are retrieved
+from, and the base against which `source_path` resolves. `concept` is the **mutable
+tracker** — what a staleness check re-resolves to see whether a newer version exists.
+
+For an archive whose accession is both (GEO, a BIA accession) the two hold the same
+value and the distinction is invisible. For a versioned archive they diverge, and the
+distinction is the whole point: `source_url` pins the exact version observed
+(`zenodo://7654321`, so the exact bytes can be re-fetched), while `concept` names the
+dataset (`doi:10.5281/zenodo.7654320`, which resolves to *latest*). Collapsing them
+into one field would make either re-fetching-the-observed-bytes or checking-for-newer
+impossible, depending on which meaning won.
+
+Because all three fields are scalars, and `concept` and `record_version` are header
 fields, they are addable under the §3.1 minor-version rule without a new major.

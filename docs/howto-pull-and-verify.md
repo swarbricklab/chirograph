@@ -41,6 +41,17 @@ Three hops, whether or not you can see them:
 Step 3 is why the paths in the code work. The manifest is a routing table between the
 deposit layout and the layout the analysis was written against.
 
+> **DVC does not verify what it fetches, so you must.** This is measured, not
+> cautionary: `dvc_data`'s fetch path defaults to `verify=False`
+> (`HashFileDB.__init__(verify=False)`), and on `dvc pull` from a source that serves
+> different bytes than the `.dvc` records, DVC writes the wrong bytes and reports
+> success. The recorded checksum is treated as *intent*, not enforced at fetch time.
+> This is safe for a genuinely immutable source (a Zenodo version DOI cannot serve
+> other bytes) and unsafe for any archive that can mutate in place — GEO, a BIA
+> accession, a plain HTTP URL. The manifest carries a real per-file checksum precisely
+> so a consumer can enforce it; the verify step below is what does the enforcing.
+> Full findings: [`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §6.
+
 ---
 
 ## Pulling without DVC
@@ -80,6 +91,10 @@ or `--urls` when you need to see where the bytes come from.
 ---
 
 ## Verifying
+
+This is the step that supplies the integrity DVC does not (see the callout above). For
+a mutable source it is not optional: without it, a silently-substituted file reaches
+your analysis wearing the right name.
 
 Three levels, cheapest first. All three use the same exit-code contract: `0` success,
 `1` a finding, `2` the tool could not run.

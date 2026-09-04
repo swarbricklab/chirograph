@@ -23,7 +23,13 @@ ALL_MD = [*DOCS, README]
 
 #: Documents that describe unbuilt design. They may name things that do not exist,
 #: provided they say so — which :func:`test_aspirational_docs_say_so` checks.
-ASPIRATIONAL = {"ideas.md", "manifest-registry-design.md", "resolution-and-config.md"}
+ASPIRATIONAL = {
+    "ideas.md",
+    "manifest-registry-design.md",
+    "resolution-and-config.md",
+    "updatability-and-dvc-update.md",
+    "design-check-and-update.md",
+}
 
 
 def _cli(*args: str) -> str:
@@ -76,7 +82,13 @@ def test_documented_flags_exist(doc: Path) -> None:
 
 @pytest.mark.parametrize("doc", ALL_MD, ids=lambda p: p.name)
 def test_documented_subcommands_exist(doc: Path) -> None:
-    """Catch a renamed or imagined subcommand."""
+    """Catch a renamed or imagined subcommand.
+
+    Aspirational docs are exempt: a design note may propose a verb (`chiro check`,
+    `chiro update`) that is not built yet -- the same latitude the flag check gives.
+    """
+    if doc.name in ASPIRATIONAL:
+        return
     known = set(VALID) | {"--help", "--version"}
     used = {
         m.group(1)

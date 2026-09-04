@@ -69,8 +69,9 @@ This is the same discipline that keeps the `etag` field non-authoritative
 
 ## 3. Cheap checks, by what the archive supports
 
-> Aspirational: depends on the proposed `concept`, `upstream_modified` and
-> `last_modified` fields, and on archivefs implementing the per-archive query.
+> Aspirational: depends on the proposed `concept`, `record_version` and
+> `file_version` fields (spec §8, names under cross-project review), and on archivefs
+> implementing the per-archive query.
 
 ### Archives with immutable versions — Zenodo, Dataverse, Figshare, versioned S3
 
@@ -102,7 +103,7 @@ stages.
 **Stage 1, record level.** One request for the record's last-update date:
 
 ```json
-{ "record_accession": "GSE111111", "upstream_modified": "2026-07-30" }
+{ "record_accession": "GSE111111", "record_version": "2026-07-30" }
 ```
 
 Unchanged → stop. This is the cheap negative, and it is where nearly all the savings
@@ -117,7 +118,7 @@ one request — and compare per-file dates and sizes:
 
 ```json
 { "relpath": "GSE111111_processed.h5ad", "md5": "dd44…", "size": 512900021,
-  "last_modified": "2026-07-30T09:02:00Z" }
+  "file_version": "2026-07-30T09:02:00Z" }
 ```
 
 Now you know *which* files moved, so you re-download only those. On a 200-file series
@@ -191,6 +192,14 @@ for m in .chiro/manifests/*.chiro.json; do
 done
 exit $status
 ```
+
+The loop above is the manual form, built from the real primitives `chiro capture`,
+`chiro diff` and `chiro verify`. The *packaged* form of this — the cheap record-version
+check that avoids re-fetching, and the deliberate supersede-and-repoint that also
+refreshes the `.dvc` — lives in the sibling `archivefs` project as `archivefs check`
+and `archivefs update`, because both need archive-specific network that chirograph
+deliberately does not do. See
+[`design-check-and-update.md`](design-check-and-update.md).
 
 Two design notes for whoever automates this properly:
 
