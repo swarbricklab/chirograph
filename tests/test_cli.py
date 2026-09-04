@@ -281,6 +281,34 @@ def test_capture_requires_source_url(tree: Path, capsys) -> None:
         main(["capture", str(tree)])
 
 
+def test_minor_1_flags_produce_a_1_1_manifest(tree, tmp_path, capsys) -> None:
+    target = tmp_path / "m.chiro.json"
+    code, _, _ = run(
+        capsys,
+        "capture",
+        str(tree),
+        "--source-url",
+        "geo://GSE1",
+        "--concept",
+        "geo:GSE1",
+        "--record-version",
+        "2026-07-30",
+        "-o",
+        str(target),
+    )
+    assert code == EXIT_OK
+    m = Manifest.load(target)
+    assert m.schema_version == "1.1"
+    assert m.concept == "geo:GSE1"
+    assert m.record_version == "2026-07-30"
+
+
+def test_write_without_minor_1_flags_stays_1_0(tree, tmp_path, capsys) -> None:
+    target = tmp_path / "m.chiro.json"
+    assert run(capsys, "write", str(tree), "-o", str(target))[0] == EXIT_OK
+    assert Manifest.load(target).schema_version == "1.0"
+
+
 def test_capture_lints_clean(tree: Path, capsys) -> None:
     code, _, err = run(capsys, "capture", str(tree), "--source-url", "https://x/", "--stdout")
     assert code == EXIT_OK

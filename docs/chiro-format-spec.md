@@ -1,6 +1,6 @@
 # `.chiro.json` Format Specification
 
-**Format schema version:** `1.0` · **Spec revision:** v0.4 · **Status:** frozen
+**Format schema version:** `1.1` · **Spec revision:** v0.5 · **Status:** frozen (`1.0` core; `1.1` adds the optional §8 staleness fields)
 
 This document is **normative**. It defines what a `.chiro.json` manifest is, what
 each field means, and how the hashes are computed. It deliberately contains no
@@ -107,7 +107,7 @@ that does not apply **MUST** be omitted, not set to `null`.
 | Field | Required | Type | Definition |
 |---|---|---|---|
 | `schema` | **yes** | string | **MUST** be the constant `"chirograph"`. |
-| `schema_version` | **yes** | string | `"<major>.<minor>"`. A reader **MUST** reject a differing major version. A reader **MUST** tolerate and preserve unknown fields at a higher minor version. A minor version **MAY** add only scalar-valued entry fields (see §3.3). |
+| `schema_version` | **yes** | string | `"<major>.<minor>"`. A reader **MUST** reject a differing major version. A reader **MUST** tolerate and preserve unknown fields at a higher minor version. A minor version **MAY** add only scalar-valued header or entry fields (a nested value has no canonical form; see §3.3). A writer **MUST** emit the lowest minor whose fields it uses: a manifest carrying a 1.1 field declares `"1.1"`, one carrying none declares `"1.0"`. |
 | `hash_algorithm` | **yes** | string | `"md5"` or `"sha256"`. Applies to `body_hash` and to every `files[].md5`. No other value is valid at `1.0`. A consumer **MUST** read this field before verifying anything. |
 | `provenance_type` | **yes** | string | `"self-deposited"` or `"observed-download"`. See §5. |
 | `created` | **yes** | string | ISO 8601 timestamp with an explicit UTC offset. When the manifest was written. A naive timestamp **MUST** be rejected. |
@@ -115,6 +115,8 @@ that does not apply **MUST** be omitted, not set to `null`.
 | `nfiles` | **yes** | integer | Number of entries in `files`. |
 | `body_hash` | **yes** | string | Lowercase hex digest, per `hash_algorithm`, of the canonicalised `files` array (§4). |
 | `record_accession` | optional | string | The deposition accession or identifier this manifest describes. |
+| `concept` | optional *(1.1)* | string | Mutable tracker for the origin *dataset*, as a CURIE (`geo:GSE12345`, `doi:10.5281/zenodo.7654320`) — what a staleness check re-resolves to find a newer version. Distinct from `source_url` (§8). Advisory. Present ⇒ `schema_version` ≥ `"1.1"`. |
+| `record_version` | optional *(1.1)* | string | The source's record-level version at the observed time, in whatever form the archive exposes (a date, a version DOI, a serial). **Advisory** — compared for change only, never authoritative for content (§8). Present ⇒ `schema_version` ≥ `"1.1"`. |
 | `source_url` | conditional | string | Base location of the data, and the base against which `source_path` resolves (§3.4). **Required by convention** when `provenance_type` is `"observed-download"`. |
 | `retrieved` | conditional | string | ISO 8601 timestamp with an explicit UTC offset; when the bytes were fetched. **Required by convention** when `provenance_type` is `"observed-download"`. **MUST** be omitted when `provenance_type` is `"self-deposited"`. |
 | `generator` | optional | string | Tool and version that wrote the manifest. |
@@ -139,6 +141,7 @@ The following **MUST NOT** be present at `1.0`: free-text `title`, `description`
 | `isexec` | optional | boolean | Execute bit. Reserved for DVC compatibility. |
 | `version_id` | optional | string | Provider-native object version identifier. Reserved for DVC compatibility. |
 | `etag` | optional | string | The source's native HTTP or S3 validator, as observed. **Non-authoritative**: a consumer **MUST NOT** use this field to verify content, and it **MUST NOT** substitute for `md5`. |
+| `file_version` | optional *(1.1)* | string | The source's per-file change signal, as observed (a per-file mtime, say). **Advisory** — a changed value is evidence of change, an unchanged value is evidence of nothing (§8). It **is** covered by `body_hash` (it is an entry field), but **MUST NOT** be used to verify content. Present ⇒ `schema_version` ≥ `"1.1"`. |
 
 ### 3.3 Entry fields are flat
 
@@ -303,27 +306,26 @@ a new version, never as an edit in place.
 
 ---
 
-## 8. Proposed additions (not part of `1.0`)
+## 8. The staleness fields (`1.1`)
 
-> **Status: aspirational — DRAFT, under cross-project review.** Nothing in this section
-> is implemented or valid at `schema_version` `1.0`. It is recorded so that consumers
-> do not invent conflicting spellings for the same concepts. The field names here are
-> being reconciled with the sibling `archivefs` project, whose consumer-side analysis
-> is in [`updatability-and-dvc-update.md`](updatability-and-dvc-update.md); until that
-> is settled these names may change. See [`howto-drift.md`](howto-drift.md) for the
-> workflow they serve.
+*(Added in `1.1`.)* Three optional scalar fields for detecting that an upstream record
+has changed without re-downloading it: `concept` and `record_version` (header, §3.1)
+and `file_version` (entry, §3.2). Each corresponds to one of the "three versions" in
+[`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §4, whose field names
+this section is reconciled with:
 
-A `1.1` minor would add three scalar fields, for detecting that an upstream record has
-changed without re-downloading it. Each corresponds to one of the "three versions" in
-[`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §4.
+| Field | Level | archivefs term |
+|---|---|---|
+| `concept` | header | "source URL (the tracker)", URL-3 |
+| `record_version` | header | "record version" |
+| `file_version` | entry | "file version" |
 
-| Field | Level | Proposed definition | archivefs term |
-|---|---|---|---|
-| `concept` | header | Identifier of the *dataset*, as distinct from this observation of it — the mutable pointer to re-resolve when checking for a newer version. A CURIE (`geo:GSE12345`, `doi:10.5281/zenodo.7654320`). Not derivable from `record_accession`, because a Zenodo concept DOI is not derivable from a version DOI. | "source URL (the tracker)", URL-3 |
-| `record_version` | header | The source's record-level version at the observed time, in whatever form the archive exposes it — a modification date, a version DOI, a serial. Compared for change only. | "record version" |
-| `file_version` | entry | The source's per-file change signal, as observed — a per-file mtime, or an ETag where `etag` (§3.2) is not already carrying it. | "file version" |
+A manifest that carries any of these **MUST** declare `schema_version` `"1.1"`; one that
+carries none **MUST** declare `"1.0"` (and is byte-identical to a `1.0` manifest). A
+`1.0`-only reader tolerates them as unknown fields at a higher minor (§3.1) and preserves
+them.
 
-All three would be **advisory only**. A consumer **MUST NOT** treat an unchanged value
+All three are **advisory only**. A consumer **MUST NOT** treat an unchanged value
 as evidence that content is unchanged. And the authority of a *changed* value is
 **archive-dependent**:
 
@@ -354,5 +356,5 @@ dataset (`doi:10.5281/zenodo.7654320`, which resolves to *latest*). Collapsing t
 into one field would make either re-fetching-the-observed-bytes or checking-for-newer
 impossible, depending on which meaning won.
 
-Because all three fields are scalars, and `concept` and `record_version` are header
-fields, they are addable under the §3.1 minor-version rule without a new major.
+These three fields are the whole of the `1.1` addition: all scalars, added under the
+§3.1 minor-version rule, with no change to a `1.0` manifest's bytes.

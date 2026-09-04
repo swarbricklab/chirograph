@@ -32,6 +32,7 @@ from .constants import (
     REQUIRED_HEADER_FIELDS,
     SCHEMA,
     SCHEMA_VERSION,
+    SCHEMA_VERSION_MINOR_1,
     SUPPORTED_MAJOR,
     SUPPORTED_MINOR,
 )
@@ -123,6 +124,10 @@ class FileEntry:
     isexec: bool | None = None
     version_id: str | None = None
     etag: str | None = None
+    #: *(1.1)* The source's per-file change signal, as observed (a per-file mtime,
+    #: say). Advisory only, and covered by ``body_hash`` like every entry field.
+    #: See spec §3.2 / §8.
+    file_version: str | None = None
     #: Fields not in the format, preserved verbatim when the caller opted into
     #: tolerating them. Included in canonicalisation, so they *are* covered by
     #: ``body_hash``.
@@ -250,7 +255,7 @@ class FileEntry:
         if isexec is not None and not isinstance(isexec, bool):
             raise SchemaError(f"{where}.isexec must be a boolean, got {type(isexec).__name__}")
 
-        for optional in ("version_id", "etag"):
+        for optional in ("version_id", "etag", "file_version"):
             value = payload.get(optional)
             if value is not None and not isinstance(value, str):
                 raise SchemaError(
@@ -265,6 +270,7 @@ class FileEntry:
             isexec=isexec,
             version_id=payload.get("version_id"),
             etag=payload.get("etag"),
+            file_version=payload.get("file_version"),
             extra={k: payload[k] for k in sorted(unknown)},
         )
 
@@ -312,6 +318,15 @@ class Manifest:
     created: str = field(default_factory=now_timestamp)
     retrieved: str | None = None
     generator: str | None = None
+    #: *(1.1)* Mutable tracker for the origin record, as a CURIE
+    #: (``geo:GSE12345``, ``doi:10.5281/zenodo.7654320``) — what a staleness check
+    #: re-resolves to see whether a newer version exists. Distinct from
+    #: ``source_url`` (the fetch base). Spec §3.1 / §8.
+    concept: str | None = None
+    #: *(1.1)* The source's record-level version at the observed time, in whatever
+    #: form the archive exposes (a date, a version DOI, a serial). Advisory —
+    #: compared for change only, never authoritative for content. Spec §3.1 / §8.
+    record_version: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -326,6 +341,19 @@ class Manifest:
         if self.retrieved is not None:
             self.retrieved = canonical_timestamp(self.retrieved, field="retrieved")
         self.files = normalise_order(self.files)
+        # A manifest that uses a 1.1 field must advertise at least 1.1; one that
+        # uses none keeps whatever it declared (default 1.0), so every existing
+        # manifest stays byte-identical.
+        if self._uses_minor_1_fields() and _parse_version(self.schema_version) < (1, 1):
+            self.schema_version = SCHEMA_VERSION_MINOR_1
+
+    def _uses_minor_1_fields(self) -> bool:
+        """Whether any field introduced in 1.1 is populated (spec §8)."""
+        return (
+            self.concept is not None
+            or self.record_version is not None
+            or any(entry.file_version is not None for entry in self.files)
+        )
 
     # -- derived ------------------------------------------------------------ #
 
@@ -508,9 +536,11 @@ class Manifest:
             "hash_algorithm": self.hash_algorithm,
             "provenance_type": self.provenance_type,
             "record_accession": self.record_accession,
+            "concept": self.concept,
             "source_url": self.source_url,
             "created": self.created,
             "retrieved": self.retrieved,
+            "record_version": self.record_version,
             "generator": self.generator,
             "size": self.size,
             "nfiles": self.nfiles,
@@ -618,9 +648,11 @@ class Manifest:
             hash_algorithm=algorithm,
             schema_version=str(version),
             record_accession=_optional_str(data, "record_accession"),
+            concept=_optional_str(data, "concept"),
             source_url=_optional_str(data, "source_url"),
             created=_require_str(data, "created"),
             retrieved=_optional_str(data, "retrieved"),
+            record_version=_optional_str(data, "record_version"),
             generator=_optional_str(data, "generator"),
             extra={key: data[key] for key in sorted(unknown)},
         )

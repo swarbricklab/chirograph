@@ -169,7 +169,13 @@ def test_redundant_source_path_is_not_dropped() -> None:
 
 def test_extension_fields_are_covered_by_body_hash() -> None:
     base = compute_body_hash([entry("a.txt")])
-    extras = [("isexec", True), ("version_id", "v1"), ("etag", "e"), ("source_path", "b")]
+    extras = [
+        ("isexec", True),
+        ("version_id", "v1"),
+        ("etag", "e"),
+        ("source_path", "b"),
+        ("file_version", "2026-07-30T00:00:00Z"),  # 1.1 entry field
+    ]
     for field, value in extras:
         assert compute_body_hash([entry("a.txt", **{field: value})]) != base, field
 

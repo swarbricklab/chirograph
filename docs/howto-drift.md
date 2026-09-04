@@ -69,9 +69,11 @@ This is the same discipline that keeps the `etag` field non-authoritative
 
 ## 3. Cheap checks, by what the archive supports
 
-> Aspirational: depends on the proposed `concept`, `record_version` and
-> `file_version` fields (spec §8, names under cross-project review), and on archivefs
-> implementing the per-archive query.
+> Partly built: the `concept`, `record_version` and `file_version` fields exist as of
+> `schema_version` 1.1 (spec §8) — `chiro write`/`capture` accept `--concept` and
+> `--record-version`. The *cheap query* that reads them back from a live archive is
+> archivefs's `archivefs check` (still to build), so the workflow below is only as
+> automated as that half.
 
 ### Archives with immutable versions — Zenodo, Dataverse, Figshare, versioned S3
 

@@ -1,10 +1,11 @@
 {
   "format": "chirograph-test-vectors",
   "format_version": "1.0",
-  "spec_version": "1.0",
+  "spec_version": "1.1",
   "spec_sections": [
     "\u00a73.2",
     "\u00a74",
+    "\u00a78",
     "\u00a79"
   ],
   "$comment": "FROZEN. These are conformance vectors for the .chiro.json canonicalisation and validation rules. Once published they must never change: other implementations check themselves against them. If a value here is wrong, publish a corrected vector set under a new spec_version rather than editing these in place. The file is deliberately pure ASCII (\\uXXXX escapes) so that the NFC/NFD cases are unambiguous about which codepoints they mean. 'canonical' is the exact string that gets UTF-8 encoded and hashed, carried literally so that a mismatching implementation can diff the STRING rather than stare at two digests. Any body_hash here can be re-derived with no chirograph code at all: printf '%s' \"<canonical>\" | md5sum. 'dvc_dir' / 'dvc_dir_hash' are the DERIVED DVC .dir interop form (spec \u00a70), which uses DIFFERENT serialisation (default separators, ensure_ascii=True, no size field) and therefore a different hash \u2014 see docs/decisions.md D-01.",
@@ -335,6 +336,25 @@
       "body_hash": "09b4df52ca55922d335a95baf03be786",
       "dvc_dir": "[{\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"bin/other\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"bin/tool\"}]",
       "dvc_dir_hash": "2f5d1117e3700ff24ca4a27dd4661eb7"
+    },
+    {
+      "name": "file-version-in-body",
+      "why": "(1.1) A file_version entry field. It is an ordinary scalar entry field, so it enters canonicalisation and IS covered by body_hash, sorting between 'etag' and 'isexec'. Paired with 'terse-no-source-path' (the same entry without it) to pin that adding the 1.1 field changes body_hash \u2014 i.e. it really enters the body.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6,
+          "file_version": "2026-07-30T09:02:00Z"
+        }
+      ],
+      "canonical": "[{\"file_version\":\"2026-07-30T09:02:00Z\",\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 109,
+      "canonical_sha256": "cf5f845b0993d6939fa2f9450be40a6e41da429e0c97abb79e04979a688e4941",
+      "body_hash": "53400c95f569e5d6a9648f463cca5412",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "b47e3488a546e2214c42aa9bec8396e2"
     },
     {
       "name": "large-size-beyond-double",
@@ -1518,7 +1538,7 @@
       },
       {
         "path": "sample:1/a.txt",
-        "why": "a colon is legal on POSIX away from position 1; only a DRIVE prefix like 'C:' is rejected"
+        "why": "a colon is legal on POSIX away from position 1; only a leading DRIVE prefix like 'C:' is rejected"
       },
       {
         "path": "x.tar.gz",
@@ -1632,6 +1652,34 @@
               "relpath": "GSE111111_processed.h5ad",
               "md5": "b1946ac92492d2347c6235b4d2611184",
               "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "minor-1-staleness-fields",
+        "why": "(1.1) The optional staleness fields (spec \u00a78): concept and record_version in the header, file_version per entry. Must load, and schema_version is 1.1 because 1.1 fields are present.",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.1",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "concept": "geo:GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-09-04T00:00:00Z",
+          "retrieved": "2026-09-04T00:00:00Z",
+          "record_version": "2026-07-30",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "c9f702968e40cd5ea910840dfa97b185",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "file_version": "2026-07-30T09:02:00Z"
             }
           ]
         }

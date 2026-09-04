@@ -236,6 +236,24 @@ def _add_header_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--created", metavar="TS", help="override created (ISO 8601 with offset)")
     parser.add_argument("--generator", metavar="STR", help="override the generator string")
     parser.add_argument(
+        "--concept",
+        metavar="CURIE",
+        help=(
+            "(1.1) mutable tracker for the origin record, a CURIE (geo:GSE12345, "
+            "doi:10.5281/zenodo.7654320) — what a staleness check re-resolves. Distinct "
+            "from --source-url (the fetch base). Setting it makes this a 1.1 manifest."
+        ),
+    )
+    parser.add_argument(
+        "--record-version",
+        metavar="STR",
+        help=(
+            "(1.1) the source's record-level version as observed (a date, version DOI, "
+            "or serial). Advisory — compared for change only. Setting it makes this a "
+            "1.1 manifest."
+        ),
+    )
+    parser.add_argument(
         "--hash-algorithm",
         choices=sorted(HASH_ALGORITHMS),
         default=None,
@@ -379,6 +397,16 @@ def _add_capture(subparsers: Any) -> None:
         "download finished earlier, or the provenance is wrong)",
     )
     parser.add_argument("--accession", metavar="ID", help="record_accession")
+    parser.add_argument(
+        "--concept",
+        metavar="CURIE",
+        help="(1.1) mutable tracker CURIE for the origin record (makes this a 1.1 manifest)",
+    )
+    parser.add_argument(
+        "--record-version",
+        metavar="STR",
+        help="(1.1) the source's record-level version as observed (makes this a 1.1 manifest)",
+    )
     parser.add_argument("--created", metavar="TS", help="override created")
     parser.add_argument("--generator", metavar="STR", help="override the generator string")
     parser.add_argument(
@@ -779,6 +807,8 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             provenance_type=args.provenance,
             source_url=args.source_url,
             record_accession=args.accession,
+            concept=args.concept,
+            record_version=args.record_version,
             created=args.created,
             retrieved=args.retrieved,
             generator=args.generator,
@@ -805,6 +835,8 @@ def cmd_write(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         hash_algorithm=args.hash_algorithm or DEFAULT_HASH_ALGORITHM,
         source_url=args.source_url,
         record_accession=args.accession,
+        concept=args.concept,
+        record_version=args.record_version,
         created=args.created,
         retrieved=args.retrieved,
         generator=args.generator,
@@ -834,6 +866,8 @@ def cmd_capture(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         retrieved=args.retrieved,
         hash_algorithm=args.hash_algorithm or DEFAULT_HASH_ALGORITHM,
         record_accession=args.accession,
+        concept=args.concept,
+        record_version=args.record_version,
         created=args.created,
         generator=args.generator,
         relpath_from_source=parse_rules(args.relpath_from_source),
@@ -1014,9 +1048,11 @@ def cmd_info(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         "hash_algorithm": manifest.hash_algorithm,
         "provenance_type": manifest.provenance_type,
         "record_accession": manifest.record_accession,
+        "concept": manifest.concept,
         "source_url": manifest.source_url,
         "created": manifest.created,
         "retrieved": manifest.retrieved,
+        "record_version": manifest.record_version,
         "generator": manifest.generator,
         "nfiles": manifest.nfiles,
         "size": manifest.size,

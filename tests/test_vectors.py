@@ -43,7 +43,9 @@ def test_vector_file_is_pure_ascii() -> None:
 
 def test_vector_file_declares_its_own_freeze() -> None:
     assert VECTORS["format"] == "chirograph-test-vectors"
-    assert VECTORS["spec_version"] == "1.0"
+    # Bumped to 1.1 when the staleness fields were added (spec §8); existing 1.0
+    # case values are unchanged — the set is a superset, not an edit in place.
+    assert VECTORS["spec_version"] == "1.1"
     assert "FROZEN" in VECTORS["$comment"]
 
 

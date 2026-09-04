@@ -90,6 +90,15 @@ ENTRY = {
                 "content alone. See docs/decisions.md D-04."
             ),
         },
+        "file_version": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "(1.1) The source's per-file change signal, as observed (e.g. a per-file "
+                "mtime). Advisory only: a changed value is evidence of change, an unchanged "
+                "value is evidence of nothing. Covered by body_hash. See spec section 8."
+            ),
+        },
     },
 }
 
@@ -156,6 +165,24 @@ SCHEMA = {
             "type": "string",
             "minLength": 1,
             "description": "Deposition accession this manifest describes (GSE..., EGAD...).",
+        },
+        "concept": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "(1.1) Mutable tracker for the origin record, as a CURIE (geo:GSE12345, "
+                "doi:10.5281/zenodo.7654320) - what a staleness check re-resolves to find a "
+                "newer version. Distinct from source_url (the fetch base). See spec section 8."
+            ),
+        },
+        "record_version": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "(1.1) The source's record-level version at the observed time (a date, "
+                "version DOI, or serial). Advisory - compared for change only, never "
+                "authoritative for content. See spec section 8."
+            ),
         },
         "source_url": {
             "type": "string",
