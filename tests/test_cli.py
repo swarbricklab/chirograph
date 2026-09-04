@@ -136,6 +136,80 @@ def test_write_sha256(tree: Path, capsys) -> None:
     assert len(json.loads(out)["body_hash"]) == 64
 
 
+# --------------------------------------------------------------------------- #
+# write/capture output policy: no silent clobber, no silent empty manifest
+# --------------------------------------------------------------------------- #
+
+
+def test_write_refuses_to_clobber_existing_output(tree: Path, tmp_path: Path, capsys) -> None:
+    target = tmp_path / "m.chiro.json"
+    assert run(capsys, "write", str(tree), "-o", str(target))[0] == EXIT_OK
+    first = target.read_bytes()
+    # A second write to the same path must refuse rather than overwrite.
+    code, _, err = run(capsys, "write", str(tree), "--accession", "changed", "-o", str(target))
+    assert code == EXIT_ERROR
+    assert "already exists" in err
+    assert target.read_bytes() == first  # untouched
+
+
+def test_write_force_overwrites(tree: Path, tmp_path: Path, capsys) -> None:
+    target = tmp_path / "m.chiro.json"
+    assert run(capsys, "write", str(tree), "-o", str(target))[0] == EXIT_OK
+    args = ("write", str(tree), "--accession", "GSE9", "-o", str(target), "--force")
+    code, _, _ = run(capsys, *args)
+    assert code == EXIT_OK
+    assert Manifest.load(target).record_accession == "GSE9"
+
+
+def test_capture_twice_does_not_clobber_the_drift_snapshot(
+    tree: Path, tmp_path: Path, capsys
+) -> None:
+    # Two observations of one accession would default to the same filename; the
+    # second must not destroy the first (which is the drift record).
+    out = tmp_path / "GSE1.chiro.json"
+    common = ("capture", str(tree), "--source-url", "geo://GSE1", "--accession", "GSE1")
+    assert run(capsys, *common, "-o", str(out))[0] == EXIT_OK
+    code, _, err = run(capsys, *common, "-o", str(out))
+    assert code == EXIT_ERROR
+    assert "already exists" in err
+
+
+def test_clobber_guard_ignores_dry_run_and_stdout(tree: Path, tmp_path: Path, capsys) -> None:
+    target = tmp_path / "m.chiro.json"
+    assert run(capsys, "write", str(tree), "-o", str(target))[0] == EXIT_OK
+    # Neither writes to the existing path, so neither is a clobber.
+    assert run(capsys, "write", str(tree), "-o", str(target), "--dry-run")[0] == EXIT_OK
+    assert run(capsys, "write", str(tree), "-o", str(target), "--stdout")[0] == EXIT_OK
+
+
+def test_write_refuses_empty_manifest(tmp_path: Path, capsys) -> None:
+    # A directory of manifests: the default *.chiro.json exclude drops everything.
+    d = tmp_path / "manifests"
+    d.mkdir()
+    (d / "a.chiro.json").write_text("{}")
+    code, _, err = run(capsys, "write", str(d), "-o", str(tmp_path / "out.chiro.json"))
+    assert code == EXIT_ERROR
+    assert "empty manifest" in err
+    assert not (tmp_path / "out.chiro.json").exists()
+
+
+def test_write_allow_empty(tmp_path: Path, capsys) -> None:
+    d = tmp_path / "empty"
+    d.mkdir()
+    target = tmp_path / "e.chiro.json"
+    code, _, _ = run(capsys, "write", str(d), "-o", str(target), "--allow-empty")
+    assert code == EXIT_OK
+    assert Manifest.load(target).nfiles == 0
+
+
+def test_dry_run_reports_empty_without_failing(tmp_path: Path, capsys) -> None:
+    d = tmp_path / "empty"
+    d.mkdir()
+    code, _, err = run(capsys, "write", str(d), "--dry-run")
+    assert code == EXIT_OK
+    assert "0 file(s)" in err
+
+
 def test_capture_requires_source_url(tree: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         main(["capture", str(tree)])
