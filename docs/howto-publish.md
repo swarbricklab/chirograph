@@ -119,7 +119,11 @@ equivalents work.
 for m in .chiro/manifests/*.chiro.json; do chiro validate "$m" || exit 1; done
 ```
 
-**Every dataset matches its manifest:**
+**Every dataset matches its manifest** — and note this check is doing real work, not
+box-ticking: DVC does not verify bytes on fetch (`verify=False` by default), so a
+`dvc pull` in a reader's fresh clone will *not* catch a source that has served
+substitute bytes. `chiro verify` is the only thing that will. See
+[`updatability-and-dvc-update.md`](updatability-and-dvc-update.md) §6.
 
 ```bash
 for m in .chiro/manifests/*.chiro.json; do chiro verify "$m" || exit 1; done

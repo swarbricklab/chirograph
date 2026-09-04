@@ -191,7 +191,17 @@ corroborating evidence, the per-entry `etag` field carries it *next to* a real d
 which is honest about which is which. See [`decisions.md`](decisions.md) D-04.
 
 The same discipline governs the proposed `1.1` staleness fields (spec §8): a changed
-signal is evidence of change; an unchanged signal is not evidence of anything.
+signal is evidence of change; an unchanged signal is not evidence of anything. And even
+a *changed* `record_version` is only authoritative where the archive backs it with a
+guaranteed-immutable version identifier (a Zenodo version DOI). For the archives this
+format most needs to tame — GEO, submitted-to-BIA — `record_version` is only a
+modification time, which bumps on a metadata edit or an identical re-upload as readily
+as on a real change. There, a changed value means "maybe newer, go verify," never
+"definitely newer," and never "the content changed." Spec §8 states this as a
+requirement; it is repeated here because reading an mtime diff as authoritative is the
+natural mistake, and it would quietly reintroduce the mutate-in-place hole the format
+exists to close. (Raised by the archivefs side, which populates these fields per
+archive and hits exactly this asymmetry.)
 
 ---
 
