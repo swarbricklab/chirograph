@@ -21,6 +21,7 @@ __all__ = [
     "RESERVED_HASH_ALGORITHMS",
     "SCHEMA",
     "SCHEMA_VERSION",
+    "SCHEMA_VERSION_MINOR_1",
     "SUPPORTED_MAJOR",
     "SUPPORTED_MINOR",
 ]
@@ -30,14 +31,23 @@ __all__ = [
 #: (spec §1.1).
 SCHEMA: Final = "chirograph"
 
-#: Format version this implementation writes.
+#: Format version this implementation writes *by default* — i.e. for a manifest
+#: that uses no field newer than 1.0. A manifest carrying a 1.1 field (``concept``,
+#: ``record_version``, ``file_version``) advertises ``SCHEMA_VERSION_MINOR_1``
+#: instead; see ``Manifest.__post_init__``. Keeping the floor at 1.0 is what makes
+#: every existing manifest byte-identical.
 SCHEMA_VERSION: Final = "1.0"
+
+#: The minor bump that adds the optional staleness fields (spec §8).
+SCHEMA_VERSION_MINOR_1: Final = "1.1"
 
 #: Highest ``schema_version`` this implementation can read. A differing *major*
 #: is a hard error; a higher *minor* is additive and merely relaxes unknown-field
-#: strictness (see docs/decisions.md D-07).
+#: strictness (see docs/decisions.md D-07). Bumped to 1 for the 1.1 fields, so a
+#: ``1.1`` document is read *strictly* (its fields are known) and only ``1.2+`` is
+#: tolerated leniently.
 SUPPORTED_MAJOR: Final = 1
-SUPPORTED_MINOR: Final = 0
+SUPPORTED_MINOR: Final = 1
 
 #: Compound extension identifying a manifest to humans and to globs (spec §1.1).
 MANIFEST_SUFFIX: Final = ".chiro.json"
@@ -83,9 +93,11 @@ HEADER_FIELD_ORDER: Final[tuple[str, ...]] = (
     "hash_algorithm",
     "provenance_type",
     "record_accession",
+    "concept",  # 1.1
     "source_url",
     "created",
     "retrieved",
+    "record_version",  # 1.1
     "generator",
     "size",
     "nfiles",
@@ -101,6 +113,7 @@ ENTRY_FIELD_ORDER: Final[tuple[str, ...]] = (
     "isexec",
     "version_id",
     "etag",
+    "file_version",  # 1.1
 )
 
 #: Header fields that must be present.

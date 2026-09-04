@@ -193,6 +193,78 @@ def test_higher_minor_version_is_tolerated_and_relaxes_unknown_fields() -> None:
     assert manifest.extra["future_field"] == "whatever"
 
 
+# --------------------------------------------------------------------------- #
+# 1.1 staleness fields (spec §8)
+# --------------------------------------------------------------------------- #
+
+
+def test_no_minor_1_field_stays_1_0() -> None:
+    # The backward-compat lever: a manifest using no 1.1 field is byte-identical
+    # to a 1.0 manifest and still declares 1.0.
+    assert sample().schema_version == "1.0"
+
+
+def test_header_minor_1_field_bumps_to_1_1() -> None:
+    m = Manifest(files=[FileEntry("a.txt", MD5_A, 6)], concept="geo:GSE1")
+    assert m.schema_version == "1.1"
+    m2 = Manifest(files=[FileEntry("a.txt", MD5_A, 6)], record_version="2026-07-30")
+    assert m2.schema_version == "1.1"
+
+
+def test_entry_file_version_bumps_to_1_1_and_enters_body_hash() -> None:
+    plain = Manifest(files=[FileEntry("a.txt", MD5_A, 6)])
+    tagged = Manifest(files=[FileEntry("a.txt", MD5_A, 6, file_version="2026-07-30T00:00:00Z")])
+    assert tagged.schema_version == "1.1"
+    assert tagged.body_hash != plain.body_hash  # it is a body field
+
+
+def test_minor_1_round_trips() -> None:
+    m = Manifest(
+        files=[FileEntry("a.txt", MD5_A, 6, file_version="2026-07-30T00:00:00Z")],
+        concept="geo:GSE1",
+        record_version="2026-07-30",
+    )
+    back = Manifest.from_dict(m.to_dict())
+    assert back.concept == "geo:GSE1"
+    assert back.record_version == "2026-07-30"
+    assert back.files[0].file_version == "2026-07-30T00:00:00Z"
+    assert back.schema_version == "1.1"
+
+
+def test_absent_minor_1_fields_are_omitted_not_null() -> None:
+    out = sample().to_dict()
+    assert "concept" not in out
+    assert "record_version" not in out
+    assert "file_version" not in out["files"][0]
+
+
+def test_minor_1_is_read_strictly() -> None:
+    # After bumping SUPPORTED_MINOR to 1, a 1.1 document is strict: its three
+    # fields are KNOWN (accepted), but a genuinely unknown field is still rejected.
+    ok = document(schema_version="1.1", concept="geo:GSE1", record_version="2026-07-30")
+    assert Manifest.from_dict(ok).concept == "geo:GSE1"
+    with pytest.raises(SchemaError, match="unrecognised header field"):
+        Manifest.from_dict(document(schema_version="1.1", mystery=1))
+
+
+def test_minor_1_null_header_fields_rejected() -> None:
+    # Header optionals reject an explicit null (format discipline: absent, not null).
+    for field_name in ("concept", "record_version"):
+        with pytest.raises(SchemaError):
+            Manifest.from_dict(document(schema_version="1.1", **{field_name: None}))
+
+
+def test_minor_1_null_file_version_is_treated_as_absent() -> None:
+    # An entry optional set to null is absorbed as absent — the same lenience the
+    # existing version_id/etag entry optionals have. So file_version follows its
+    # siblings; it does not become a stray 1.1 field.
+    payload = document(schema_version="1.1")
+    payload["files"][0]["file_version"] = None
+    manifest = Manifest.from_dict(payload)
+    assert manifest.files[0].file_version is None
+    assert "file_version" not in manifest.to_dict()["files"][0]
+
+
 def test_unknown_header_field_rejected_at_our_own_version() -> None:
     with pytest.raises(SchemaError, match="unrecognised header field"):
         Manifest.from_dict(document(mystery=1))

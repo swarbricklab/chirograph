@@ -217,6 +217,15 @@ CASES: list[tuple[str, str, str, list[dict[str, object]]]] = [
         ],
     ),
     (
+        "file-version-in-body",
+        "(1.1) A file_version entry field. It is an ordinary scalar entry field, so it "
+        "enters canonicalisation and IS covered by body_hash, sorting between 'etag' and "
+        "'isexec'. Paired with 'terse-no-source-path' (the same entry without it) to pin "
+        "that adding the 1.1 field changes body_hash — i.e. it really enters the body.",
+        "md5",
+        [{"relpath": "a.txt", "md5": MD5_A, "size": 6, "file_version": "2026-07-30T09:02:00Z"}],
+    ),
+    (
         "large-size-beyond-double",
         "2**53 + 1 = 9007199254740993 bytes (~9 PB). Exactly representable as a JSON "
         "integer but NOT as an IEEE-754 double: a parser that routes integers "
@@ -380,6 +389,34 @@ GOOD_MANIFEST = {
 }
 GOOD_MANIFEST["body_hash"] = compute_body_hash(GOOD_MANIFEST["files"], "md5")  # type: ignore[arg-type]
 
+# A valid 1.1 document: the optional staleness fields present (spec §8). Separate
+# from GOOD_MANIFEST so the frozen 1.0 vector that references it is never disturbed.
+MINOR_1_MANIFEST = {
+    "schema": "chirograph",
+    "schema_version": "1.1",
+    "hash_algorithm": "md5",
+    "provenance_type": "observed-download",
+    "record_accession": "GSE111111",
+    "concept": "geo:GSE111111",
+    "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+    "created": "2026-09-04T00:00:00Z",
+    "retrieved": "2026-09-04T00:00:00Z",
+    "record_version": "2026-07-30",
+    "generator": "chirograph 0.1.0",
+    "size": 6,
+    "nfiles": 1,
+    "body_hash": "",  # filled in below
+    "files": [
+        {
+            "relpath": "GSE111111_processed.h5ad",
+            "md5": MD5_A,
+            "size": 6,
+            "file_version": "2026-07-30T09:02:00Z",
+        }
+    ],
+}
+MINOR_1_MANIFEST["body_hash"] = compute_body_hash(MINOR_1_MANIFEST["files"], "md5")  # type: ignore[arg-type]
+
 
 def _mutate(**changes: object) -> dict[str, object]:
     document = json.loads(json.dumps(GOOD_MANIFEST))
@@ -517,8 +554,8 @@ def build() -> dict[str, object]:
     return {
         "format": "chirograph-test-vectors",
         "format_version": "1.0",
-        "spec_version": "1.0",
-        "spec_sections": ["§3.2", "§4", "§9"],
+        "spec_version": "1.1",
+        "spec_sections": ["§3.2", "§4", "§8", "§9"],
         "$comment": (
             "FROZEN. These are conformance vectors for the .chiro.json canonicalisation "
             "and validation rules. Once published they must never change: other "
@@ -557,7 +594,14 @@ def build() -> dict[str, object]:
                     "why": "Spec §8.2: layout preserved, so no source_path and the body is "
                     "DVC-.dir-shaped.",
                     "document": GOOD_MANIFEST,
-                }
+                },
+                {
+                    "name": "minor-1-staleness-fields",
+                    "why": "(1.1) The optional staleness fields (spec §8): concept and "
+                    "record_version in the header, file_version per entry. Must load, and "
+                    "schema_version is 1.1 because 1.1 fields are present.",
+                    "document": MINOR_1_MANIFEST,
+                },
             ],
             "invalid": BAD_MANIFESTS,
         },
