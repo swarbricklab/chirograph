@@ -477,6 +477,31 @@ foundation.
 
 ## 9. Honest caveats & open items
 
+> **Added after implementing Milestone 1.** Three notes from building the library,
+> before the pre-existing list:
+>
+> - **§2's whole-file addressing has a reformatting hazard.** A whole-file hash is a
+>   hash of *bytes*, so re-indenting a manifest changes its `chiro://` reference
+>   without changing a single fact it asserts — and manifests are meant to live in
+>   Git (howto-publish), where editors and pre-commit hooks reformat JSON routinely. In a
+>   registry keyed on that hash, a reformat silently relocates the object. A
+>   reformat-invariant alternative (a hash over the manifest's *canonical document*
+>   form) is implemented as `chiro ref --canonical`; choosing between them is a
+>   registry decision. See [`decisions.md`](decisions.md) **D-09**.
+> - **§6's tiers already exist as CLI commands.** Tier 1 is `chiro validate` (reads
+>   no data); Tier 2b is `chiro verify`, which reports
+>   `tier1`/`tier2b-full`/`tier2b-sampled` in this note's own vocabulary. §8's
+>   "cheapest checks first" is already the layering: `validate` → `verify --layer 2`
+>   → `verify --sample N` → `verify`. A registry's CI should be a thin wrapper over
+>   these rather than a reimplementation, so the gate and the local tool can never
+>   disagree about what "verified" means.
+> - **Sampling is deterministic**, seeded from the manifest's `body_hash`, so
+>   `tier2b-sampled` is reproducible and auditable after the fact rather than a
+>   euphemism — a registry can record just the fraction and the manifest hash, and
+>   anyone can re-derive which files were covered ([`decisions.md`](decisions.md)
+>   **D-12**).
+
+
 - **CI verifies "was true as of D," not "is still true."** Even verified manifests
   are time-stamped truths against mutable upstreams (GEO). Correct for
   reproducibility; a caveat for "get me the current version." `retrieved` stays

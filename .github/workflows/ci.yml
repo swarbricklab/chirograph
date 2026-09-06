@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Type-check
+        run: mypy
+      - name: Test
+        run: pytest --cov=chirograph --cov-report=term-missing
+
+  # The conformance vectors are a published freeze: other implementations check
+  # themselves against them. This job re-derives every hash with coreutils, so a
+  # bug in chirograph cannot make the vectors agree with themselves.
+  vectors-independent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Re-derive every vector hash with md5sum / sha256sum
+        run: tools/check_vectors_independently.sh
+
+  # The core must stay importable and fully functional with NO third-party
+  # packages installed (docs/decisions.md D-08). A dependency creeping into the
+  # core would otherwise only be noticed by a downstream consumer.
+  no-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        # `build` and its deps must NOT pollute the environment the purity check
+        # runs in, so building and checking are deliberately separated: the wheel
+        # is built here, then installed into a fresh venv below. (Doing both in one
+        # env made the check flag `build` itself — the bug this job is meant to catch
+        # for the package, turned on the job's own tooling.)
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist .
+      - name: Install the wheel into a clean venv with no extras
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+      - name: Assert nothing but chirograph was installed
+        run: |
+          installed=$(/tmp/clean/bin/pip list --format=freeze | grep -viE '^(chirograph|pip|setuptools|wheel)=' || true)
+          if [ -n "$installed" ]; then
+            echo "unexpected dependencies installed:"; echo "$installed"; exit 1
+          fi
+      - name: Conformance suite and packaged data files must work from the wheel
+        run: |
+          /tmp/clean/bin/chiro --version
+          /tmp/clean/bin/chiro test-vectors --check
+          /tmp/clean/bin/chiro schema > /dev/null
+      - name: Optional extras must fail with guidance, not a traceback
+        run: |
+          mkdir -p sample && printf 'hello\n' > sample/a.txt
+          /tmp/clean/bin/chiro write sample -o m.chiro.json
+          # Exit 2 = the tool could not run. Exit 1 would mean the manifest is
+          # invalid, which would wrongly block a merge (D-16).
+          set +e
+          /tmp/clean/bin/chiro validate m.chiro.json --jsonschema; code=$?
+          set -e
+          [ "$code" -eq 2 ] || { echo "expected exit 2 for a missing extra, got $code"; exit 1; }
+
+  # Interop is only meaningful against the real tool, so this job installs DVC and
+  # checks `chiro dvc-dir` against what `dvc add` actually writes.
+  dvc-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with DVC
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]' dvc
+      - name: Run the interop tests
+        env:
+          DVC_NO_ANALYTICS: "1"
+        run: pytest -m dvc -v

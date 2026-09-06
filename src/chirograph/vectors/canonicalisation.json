@@ -1,0 +1,2035 @@
+{
+  "format": "chirograph-test-vectors",
+  "format_version": "1.0",
+  "spec_version": "1.1",
+  "spec_sections": [
+    "\u00a73.2",
+    "\u00a74",
+    "\u00a78",
+    "\u00a79"
+  ],
+  "$comment": "FROZEN. These are conformance vectors for the .chiro.json canonicalisation and validation rules. Once published they must never change: other implementations check themselves against them. If a value here is wrong, publish a corrected vector set under a new spec_version rather than editing these in place. The file is deliberately pure ASCII (\\uXXXX escapes) so that the NFC/NFD cases are unambiguous about which codepoints they mean. 'canonical' is the exact string that gets UTF-8 encoded and hashed, carried literally so that a mismatching implementation can diff the STRING rather than stare at two digests. Any body_hash here can be re-derived with no chirograph code at all: printf '%s' \"<canonical>\" | md5sum. 'dvc_dir' / 'dvc_dir_hash' are the DERIVED DVC .dir interop form (spec \u00a70), which uses DIFFERENT serialisation (default separators, ensure_ascii=True, no size field) and therefore a different hash \u2014 see docs/decisions.md D-01.",
+  "canonicalisation": [
+    {
+      "name": "empty",
+      "why": "A manifest may legitimately describe zero files. The canonical form of an empty array is '[]' \u2014 two bytes, not the empty string.",
+      "hash_algorithm": "md5",
+      "input": [],
+      "canonical": "[]",
+      "canonical_utf8_bytes": 2,
+      "canonical_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "body_hash": "d751713988987e9331980363e24189ce",
+      "dvc_dir": "[]",
+      "dvc_dir_hash": "d751713988987e9331980363e24189ce"
+    },
+    {
+      "name": "single-minimal",
+      "why": "The smallest real case: one entry with only the three required fields. Keys come out alphabetically (md5, relpath, size), not in declaration order.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 71,
+      "canonical_sha256": "ba33dece504581fb71da7a48b2bab3519d73ffbfb9c995489f4a54f234bf1f77",
+      "body_hash": "20916f770fe0313353adc9c987934bb7",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "b47e3488a546e2214c42aa9bec8396e2"
+    },
+    {
+      "name": "unsorted-input",
+      "why": "Canonicalisation sorts; the on-disk order of the input must not affect the hash. Same expected output as 'sorted-input'.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "sub/b.txt",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 6
+        },
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6},{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"sub/b.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 145,
+      "canonical_sha256": "50eaed367ec4108ea327ff6fb1f2b1067e59cdbdf4958627b94ba37aec0d9649",
+      "body_hash": "53d87abd8060739069e3b3ddfae0b04b",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}, {\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"sub/b.txt\"}]",
+      "dvc_dir_hash": "5369cb520f35f5d77e793cf181884a27"
+    },
+    {
+      "name": "sorted-input",
+      "why": "The same entries already in order. Must hash identically to 'unsorted-input'.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6
+        },
+        {
+          "relpath": "sub/b.txt",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 6
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6},{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"sub/b.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 145,
+      "canonical_sha256": "50eaed367ec4108ea327ff6fb1f2b1067e59cdbdf4958627b94ba37aec0d9649",
+      "body_hash": "53d87abd8060739069e3b3ddfae0b04b",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}, {\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"sub/b.txt\"}]",
+      "dvc_dir_hash": "5369cb520f35f5d77e793cf181884a27"
+    },
+    {
+      "name": "key-order-scrambled",
+      "why": "Keys given in a deliberately odd order. sort_keys=True must make this identical to 'single-minimal'.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "size": 6,
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "relpath": "a.txt"
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 71,
+      "canonical_sha256": "ba33dece504581fb71da7a48b2bab3519d73ffbfb9c995489f4a54f234bf1f77",
+      "body_hash": "20916f770fe0313353adc9c987934bb7",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "b47e3488a546e2214c42aa9bec8396e2"
+    },
+    {
+      "name": "sort-hyphen-before-slash",
+      "why": "THE sort trap. The sort key is the joined POSIX path as a plain string, not a tuple of components. '-' is U+002D and '/' is U+002F, so 'a-b/x' sorts BEFORE 'a/b'. An implementation that splits into components first, or that sorts by (dirname, basename), gets the opposite order and a different hash.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a/b",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        },
+        {
+          "relpath": "a-b/x",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 1
+        },
+        {
+          "relpath": "a.b",
+          "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"a-b/x\",\"size\":1},{\"md5\":\"5eb63bbbe01eeed093cb22bb8f5acdc3\",\"relpath\":\"a.b\",\"size\":1},{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a/b\",\"size\":1}]",
+      "canonical_utf8_bytes": 207,
+      "canonical_sha256": "e7aeabeb3985c5e9c88923f45dd0a4334ac25f9567a6714e1064a75cd8a51f77",
+      "body_hash": "fe4c2ede190d199acd51f67fcddbc739",
+      "dvc_dir": "[{\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"a-b/x\"}, {\"md5\": \"5eb63bbbe01eeed093cb22bb8f5acdc3\", \"relpath\": \"a.b\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a/b\"}]",
+      "dvc_dir_hash": "ea19f7dae641b033f6210a9bfe3466f2"
+    },
+    {
+      "name": "sort-case-sensitive",
+      "why": "Sorting is by codepoint, not case-folded or locale-aware. All ASCII uppercase precedes all ASCII lowercase, so 'B.txt' sorts before 'a.txt'. A locale-aware sort (or Python's `sorted(key=str.lower)`) reverses this.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        },
+        {
+          "relpath": "B.txt",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 1
+        },
+        {
+          "relpath": "_under.txt",
+          "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"B.txt\",\"size\":1},{\"md5\":\"5eb63bbbe01eeed093cb22bb8f5acdc3\",\"relpath\":\"_under.txt\",\"size\":1},{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":1}]",
+      "canonical_utf8_bytes": 216,
+      "canonical_sha256": "c2d660b1204707d7f5016f5f55803c9ef069c6898c1c939ded378001f92e727e",
+      "body_hash": "f68d0bbfffa4c3de7ca4de4d322aedb0",
+      "dvc_dir": "[{\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"B.txt\"}, {\"md5\": \"5eb63bbbe01eeed093cb22bb8f5acdc3\", \"relpath\": \"_under.txt\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "56c02b5733162f9089ea0f0a0346042e"
+    },
+    {
+      "name": "nfd-input-normalised",
+      "why": "Input carries a decomposed e-acute (e + U+0301, as macOS produces). The canonical form carries the composed U+00E9. An implementation that skips NFC normalisation produces a manifest that a Linux-built one cannot match.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "cafe\u0301.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"caf\u00e9.txt\",\"size\":1}]",
+      "canonical_utf8_bytes": 75,
+      "canonical_sha256": "078adc913987e08cb5feba703edbdb3f99f7aa5ab26b515b0f57a9ca3edf647e",
+      "body_hash": "45889e898af56b5f141a0868c379d1e4",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"caf\\u00e9.txt\"}]",
+      "dvc_dir_hash": "040f55ac4bc51a3190fac49b0f4dc8b2"
+    },
+    {
+      "name": "nfc-then-sort-ordering-trap",
+      "why": "THE order-of-operations trap. Normalise BEFORE sorting. In NFD, 'cafe\\u0301' sorts before 'caff' (compare 'e' U+0065 with 'f' U+0066). After NFC it is 'caf\\u00e9', which sorts AFTER 'caff' (U+00E9 > U+0066). Sort-then-normalise yields the reverse order and a different hash.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "cafe\u0301",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        },
+        {
+          "relpath": "caff",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"caff\",\"size\":1},{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"caf\u00e9\",\"size\":1}]",
+      "canonical_utf8_bytes": 140,
+      "canonical_sha256": "39b2d6ea6cfa6cf77a8c3cf756455fe0b058ba891ed2b21dcc71b10984e76370",
+      "body_hash": "ddb786e108d7327985563b471b4cd74d",
+      "dvc_dir": "[{\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"caff\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"caf\\u00e9\"}]",
+      "dvc_dir_hash": "05cac56116ee818b0f26dde19c721e08"
+    },
+    {
+      "name": "non-ascii-literal-in-canonical",
+      "why": "ensure_ascii=False: non-ASCII codepoints appear as literal UTF-8 in the canonical bytes, NOT as \\uXXXX escapes. Contrast the dvc_dir field of this same case, which does escape them \u2014 that difference is precisely why body_hash is not a DVC .dir hash.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "caf\u00e9.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        },
+        {
+          "relpath": "na\u00efve\u2014dash.txt",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"caf\u00e9.txt\",\"size\":1},{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"na\u00efve\u2014dash.txt\",\"size\":1}]",
+      "canonical_utf8_bytes": 157,
+      "canonical_sha256": "440d0ad72305559f68304eae0c4cf36169432c3e4e5631cd34adf3ccebc82fff",
+      "body_hash": "0738e2feb7362466a6f692cf0a77c6c0",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"caf\\u00e9.txt\"}, {\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"na\\u00efve\\u2014dash.txt\"}]",
+      "dvc_dir_hash": "afb44a631e0ce14a616dfe76cac59e88"
+    },
+    {
+      "name": "astral-plane-codepoint",
+      "why": "A codepoint above U+FFFF (U+1F9EC DNA DOUBLE HELIX), which is one 4-byte UTF-8 sequence but a surrogate PAIR in UTF-16. Implementations that sort or length-check in UTF-16 code units diverge here.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "\ud83e\uddec-sample/reads.fq.gz",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        },
+        {
+          "relpath": "zz-sample/reads.fq.gz",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"zz-sample/reads.fq.gz\",\"size\":1},{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"\ud83e\uddec-sample/reads.fq.gz\",\"size\":1}]",
+      "canonical_utf8_bytes": 175,
+      "canonical_sha256": "ebb0384097a0d76fdf57628a922910d8470a738d08fbf06a7e778ca284c1db79",
+      "body_hash": "5b87331716a57a990d29007b09daedc8",
+      "dvc_dir": "[{\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"zz-sample/reads.fq.gz\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"\\ud83e\\uddec-sample/reads.fq.gz\"}]",
+      "dvc_dir_hash": "5a416a77cfbb9c7c01a5d7f258fc4215"
+    },
+    {
+      "name": "source-path-relocation",
+      "why": "Spec \u00a78.1: a flat GEO deposit reorganised into a per-sample tree. source_path is included in the canonical form and sorts after 'size' alphabetically.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "sampleA/barcodes.tsv.gz",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 20481,
+          "source_path": "GSE000000_sampleA_barcodes.tsv.gz"
+        },
+        {
+          "relpath": "sampleA/matrix.mtx.gz",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 88420471,
+          "source_path": "GSE000000_sampleA_matrix.mtx.gz"
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"sampleA/barcodes.tsv.gz\",\"size\":20481,\"source_path\":\"GSE000000_sampleA_barcodes.tsv.gz\"},{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"sampleA/matrix.mtx.gz\",\"size\":88420471,\"source_path\":\"GSE000000_sampleA_matrix.mtx.gz\"}]",
+      "canonical_utf8_bytes": 284,
+      "canonical_sha256": "f2f64e197f0c2cfa4c33226df9446f869b9fc39cf7ac293e6505df0490651389",
+      "body_hash": "9e633563e8e0400ea9df588d78481582",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"sampleA/barcodes.tsv.gz\"}, {\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"sampleA/matrix.mtx.gz\"}]",
+      "dvc_dir_hash": "364adbc32ecc07e8666e9fe08c077a08"
+    },
+    {
+      "name": "redundant-source-path",
+      "why": "A source_path identical to its relpath. Canonicalisation does NOT drop it, so this hashes DIFFERENTLY from 'terse-no-source-path' below even though the two describe the same fetch. Writers omit redundant source_path; canonicalisers must not remove it, or two implementations disagree about which normalisations to apply. See docs/decisions.md D-06.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6,
+          "source_path": "a.txt"
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6,\"source_path\":\"a.txt\"}]",
+      "canonical_utf8_bytes": 93,
+      "canonical_sha256": "7057e4de7bfa3f02471730a9945446b5f3b7e59120e8fddc28371cf11a2a7674",
+      "body_hash": "63de9d9070673e5fd4fd40f46da91c8c",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "b47e3488a546e2214c42aa9bec8396e2"
+    },
+    {
+      "name": "terse-no-source-path",
+      "why": "The same fetch expressed tersely. Deliberately paired with 'redundant-source-path' to pin that the two body_hash values differ.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 71,
+      "canonical_sha256": "ba33dece504581fb71da7a48b2bab3519d73ffbfb9c995489f4a54f234bf1f77",
+      "body_hash": "20916f770fe0313353adc9c987934bb7",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "b47e3488a546e2214c42aa9bec8396e2"
+    },
+    {
+      "name": "extension-fields",
+      "why": "All DVC-compat and supplementary fields present at once, to pin their key ordering (etag, isexec, md5, relpath, size, source_path, version_id) and that booleans serialise as bare true/false.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "bin/tool",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1024,
+          "source_path": "dist/tool",
+          "isexec": true,
+          "version_id": "3HL4kqtJlcpXroDTDmjVBH40Nrjfkd",
+          "etag": "9b2cf535f27731c974343645a3985328-2"
+        },
+        {
+          "relpath": "bin/other",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 0,
+          "isexec": false
+        }
+      ],
+      "canonical": "[{\"isexec\":false,\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"bin/other\",\"size\":0},{\"etag\":\"9b2cf535f27731c974343645a3985328-2\",\"isexec\":true,\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"bin/tool\",\"size\":1024,\"source_path\":\"dist/tool\",\"version_id\":\"3HL4kqtJlcpXroDTDmjVBH40Nrjfkd\"}]",
+      "canonical_utf8_bytes": 296,
+      "canonical_sha256": "6f7a84d8e1d68601120f14a70e17e45f3bf45e83c738aaa50305bd70ac903f9d",
+      "body_hash": "09b4df52ca55922d335a95baf03be786",
+      "dvc_dir": "[{\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"bin/other\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"bin/tool\"}]",
+      "dvc_dir_hash": "2f5d1117e3700ff24ca4a27dd4661eb7"
+    },
+    {
+      "name": "file-version-in-body",
+      "why": "(1.1) A file_version entry field. It is an ordinary scalar entry field, so it enters canonicalisation and IS covered by body_hash, sorting between 'etag' and 'isexec'. Paired with 'terse-no-source-path' (the same entry without it) to pin that adding the 1.1 field changes body_hash \u2014 i.e. it really enters the body.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6,
+          "file_version": "2026-07-30T09:02:00Z"
+        }
+      ],
+      "canonical": "[{\"file_version\":\"2026-07-30T09:02:00Z\",\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 109,
+      "canonical_sha256": "cf5f845b0993d6939fa2f9450be40a6e41da429e0c97abb79e04979a688e4941",
+      "body_hash": "53400c95f569e5d6a9648f463cca5412",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a.txt\"}]",
+      "dvc_dir_hash": "b47e3488a546e2214c42aa9bec8396e2"
+    },
+    {
+      "name": "large-size-beyond-double",
+      "why": "2**53 + 1 = 9007199254740993 bytes (~9 PB). Exactly representable as a JSON integer but NOT as an IEEE-754 double: a parser that routes integers through a float writes 9007199254740992 and gets a different hash. Real genomics archives are not yet this big, but a JSON parser choosing floats is a live hazard in several languages.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "huge.bin",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 9007199254740993
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"huge.bin\",\"size\":9007199254740993}]",
+      "canonical_utf8_bytes": 89,
+      "canonical_sha256": "38e79a2602c2132c810d52043c4744062bf0d82afc9ec23c20af0e20fa6d8b27",
+      "body_hash": "9900faea86b2cf0e09c8a7ece8f74fa8",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"huge.bin\"}]",
+      "dvc_dir_hash": "1df77f75acfcf1b771237d2d1313a3c4"
+    },
+    {
+      "name": "zero-size",
+      "why": "A zero-byte file. size serialises as bare 0, and the md5 is the md5 of the empty string.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "empty.txt",
+          "md5": "d41d8cd98f00b204e9800998ecf8427e",
+          "size": 0
+        }
+      ],
+      "canonical": "[{\"md5\":\"d41d8cd98f00b204e9800998ecf8427e\",\"relpath\":\"empty.txt\",\"size\":0}]",
+      "canonical_utf8_bytes": 75,
+      "canonical_sha256": "267ee91b4b997073d0eb57d1a16f07d6bb807ca59bfe9021905df2a69bc980dd",
+      "body_hash": "c8dc06f745e974d48697a0f44533dadb",
+      "dvc_dir": "[{\"md5\": \"d41d8cd98f00b204e9800998ecf8427e\", \"relpath\": \"empty.txt\"}]",
+      "dvc_dir_hash": "479babe41b3ea37ac2c06314bde9e558"
+    },
+    {
+      "name": "duplicate-md5-two-paths",
+      "why": "Identical content at two paths \u2014 legal, and mirrors DVC's content-addressed dedup (one cache object, two paths). Not a duplicate entry: relpath is what must be unique.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "copies/one.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6
+        },
+        {
+          "relpath": "copies/two.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"copies/one.txt\",\"size\":6},{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"copies/two.txt\",\"size\":6}]",
+      "canonical_utf8_bytes": 159,
+      "canonical_sha256": "0d4a97ecf4706af5fee8dcedbf44bc61663289e479d60b2851bdfbceb40db809",
+      "body_hash": "e4856a58a96cedd3ae88df96561fd007",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"copies/one.txt\"}, {\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"copies/two.txt\"}]",
+      "dvc_dir_hash": "ff238cce4166b395dcca819a49fff095"
+    },
+    {
+      "name": "path-with-url-unsafe-characters",
+      "why": "Spaces, '#', '%', '?' and '+' in paths. These are legal filenames and must pass through canonicalisation untouched \u2014 percent-encoding belongs to URL resolution, not to the manifest.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "run 1/a#b.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        },
+        {
+          "relpath": "run 1/c%20d.txt",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 1
+        },
+        {
+          "relpath": "run 1/e?f+g.txt",
+          "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"run 1/a#b.txt\",\"size\":1},{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"run 1/c%20d.txt\",\"size\":1},{\"md5\":\"5eb63bbbe01eeed093cb22bb8f5acdc3\",\"relpath\":\"run 1/e?f+g.txt\",\"size\":1}]",
+      "canonical_utf8_bytes": 239,
+      "canonical_sha256": "63932130934cb907adacd9f19d2ce0ee4417d38c070ece75e51307a085ac9c50",
+      "body_hash": "3dc2a81bf6fc90e5193c6b707b01b8fd",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"run 1/a#b.txt\"}, {\"md5\": \"591785b794601e212b260e25925636fd\", \"relpath\": \"run 1/c%20d.txt\"}, {\"md5\": \"5eb63bbbe01eeed093cb22bb8f5acdc3\", \"relpath\": \"run 1/e?f+g.txt\"}]",
+      "dvc_dir_hash": "16f3143b097355b67ba8995882993a1a"
+    },
+    {
+      "name": "deep-nesting",
+      "why": "A long path, to pin that nothing collapses or normalises interior components.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "a/b/c/d/e/f/g/h/i/j/k/leaf.txt",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 1
+        }
+      ],
+      "canonical": "[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"a/b/c/d/e/f/g/h/i/j/k/leaf.txt\",\"size\":1}]",
+      "canonical_utf8_bytes": 96,
+      "canonical_sha256": "84d2505101b37c9bce17bb964771da9f53aed040a2d987a325d9717a8745e369",
+      "body_hash": "0a76f14cdf5a28141e306c267abe6ba5",
+      "dvc_dir": "[{\"md5\": \"b1946ac92492d2347c6235b4d2611184\", \"relpath\": \"a/b/c/d/e/f/g/h/i/j/k/leaf.txt\"}]",
+      "dvc_dir_hash": "ccae0484f83218c23c1b224fbba45795"
+    },
+    {
+      "name": "sha256-algorithm",
+      "why": "hash_algorithm sha256. The wire key stays 'md5' (spec \u00a73.2 defines it as 'hash of the file's bytes, per hash_algorithm'); only the digest length and the algorithm used for body_hash change.",
+      "hash_algorithm": "sha256",
+      "input": [
+        {
+          "relpath": "a.txt",
+          "md5": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+          "size": 5
+        }
+      ],
+      "canonical": "[{\"md5\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\",\"relpath\":\"a.txt\",\"size\":5}]",
+      "canonical_utf8_bytes": 103,
+      "canonical_sha256": "ac09d41721e48d5dfc4f86fe0e7cdc6c7b845879a57f086c5099f5b37646ba3d",
+      "body_hash": "ac09d41721e48d5dfc4f86fe0e7cdc6c7b845879a57f086c5099f5b37646ba3d",
+      "dvc_dir": "[{\"relpath\": \"a.txt\", \"sha256\": \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"}]",
+      "dvc_dir_hash": "5232a0e0b21255fd19b0bf8ec7308a3816ea9d2d3764b99a2f30e33276d75284"
+    },
+    {
+      "name": "many-entries-adversarial-order",
+      "why": "200 entries interleaving upper- and lower-case stems, supplied in reverse. Catches sort instability and any accidental dependence on input order.",
+      "hash_algorithm": "md5",
+      "input": [
+        {
+          "relpath": "s19/part-199.dat",
+          "md5": "84d9ee44e457ddef7f2c4f25dc8fa865",
+          "size": 203776
+        },
+        {
+          "relpath": "S18/part-198.dat",
+          "md5": "0e65972dce68dad4d52d063967f0a705",
+          "size": 202752
+        },
+        {
+          "relpath": "s17/part-197.dat",
+          "md5": "85d8ce590ad8981ca2c8286f79f59954",
+          "size": 201728
+        },
+        {
+          "relpath": "s16/part-196.dat",
+          "md5": "084b6fbb10729ed4da8c3d3f5a3ae7c9",
+          "size": 200704
+        },
+        {
+          "relpath": "S15/part-195.dat",
+          "md5": "0336dcbab05b9d5ad24f4333c7658a0e",
+          "size": 199680
+        },
+        {
+          "relpath": "s14/part-194.dat",
+          "md5": "a597e50502f5ff68e3e25b9114205d4a",
+          "size": 198656
+        },
+        {
+          "relpath": "s13/part-193.dat",
+          "md5": "bd686fd640be98efaae0091fa301e613",
+          "size": 197632
+        },
+        {
+          "relpath": "S12/part-192.dat",
+          "md5": "58a2fc6ed39fd083f55d4182bf88826d",
+          "size": 196608
+        },
+        {
+          "relpath": "s11/part-191.dat",
+          "md5": "0aa1883c6411f7873cb83dacb17b0afc",
+          "size": 195584
+        },
+        {
+          "relpath": "s10/part-190.dat",
+          "md5": "cfecdb276f634854f3ef915e2e980c31",
+          "size": 194560
+        },
+        {
+          "relpath": "S09/part-189.dat",
+          "md5": "a2557a7b2e94197ff767970b67041697",
+          "size": 193536
+        },
+        {
+          "relpath": "s08/part-188.dat",
+          "md5": "9dcb88e0137649590b755372b040afad",
+          "size": 192512
+        },
+        {
+          "relpath": "s07/part-187.dat",
+          "md5": "31fefc0e570cb3860f2a6d4b38c6490d",
+          "size": 191488
+        },
+        {
+          "relpath": "S06/part-186.dat",
+          "md5": "9872ed9fc22fc182d371c3e9ed316094",
+          "size": 190464
+        },
+        {
+          "relpath": "s05/part-185.dat",
+          "md5": "eecca5b6365d9607ee5a9d336962c534",
+          "size": 189440
+        },
+        {
+          "relpath": "s04/part-184.dat",
+          "md5": "6cdd60ea0045eb7a6ec44c54d29ed402",
+          "size": 188416
+        },
+        {
+          "relpath": "S03/part-183.dat",
+          "md5": "cedebb6e872f539bef8c3f919874e9d7",
+          "size": 187392
+        },
+        {
+          "relpath": "s02/part-182.dat",
+          "md5": "4c5bde74a8f110656874902f07378009",
+          "size": 186368
+        },
+        {
+          "relpath": "s01/part-181.dat",
+          "md5": "fc221309746013ac554571fbd180e1c8",
+          "size": 185344
+        },
+        {
+          "relpath": "S00/part-180.dat",
+          "md5": "045117b0e0a11a242b9765e79cbf113f",
+          "size": 184320
+        },
+        {
+          "relpath": "s19/part-179.dat",
+          "md5": "8f53295a73878494e9bc8dd6c3c7104f",
+          "size": 183296
+        },
+        {
+          "relpath": "s18/part-178.dat",
+          "md5": "8f85517967795eeef66c225f7883bdcb",
+          "size": 182272
+        },
+        {
+          "relpath": "S17/part-177.dat",
+          "md5": "96da2f590cd7246bbde0051047b0d6f7",
+          "size": 181248
+        },
+        {
+          "relpath": "s16/part-176.dat",
+          "md5": "38af86134b65d0f10fe33d30dd76442e",
+          "size": 180224
+        },
+        {
+          "relpath": "s15/part-175.dat",
+          "md5": "82161242827b703e6acf9c726942a1e4",
+          "size": 179200
+        },
+        {
+          "relpath": "S14/part-174.dat",
+          "md5": "bf8229696f7a3bb4700cfddef19fa23f",
+          "size": 178176
+        },
+        {
+          "relpath": "s13/part-173.dat",
+          "md5": "f7e6c85504ce6e82442c770f7c8606f0",
+          "size": 177152
+        },
+        {
+          "relpath": "s12/part-172.dat",
+          "md5": "1ff8a7b5dc7a7d1f0ed65aaa29c04b1e",
+          "size": 176128
+        },
+        {
+          "relpath": "S11/part-171.dat",
+          "md5": "a4a042cf4fd6bfb47701cbc8a1653ada",
+          "size": 175104
+        },
+        {
+          "relpath": "s10/part-170.dat",
+          "md5": "149e9677a5989fd342ae44213df68868",
+          "size": 174080
+        },
+        {
+          "relpath": "s09/part-169.dat",
+          "md5": "3636638817772e42b59d74cff571fbb3",
+          "size": 173056
+        },
+        {
+          "relpath": "S08/part-168.dat",
+          "md5": "006f52e9102a8d3be2fe5614f42ba989",
+          "size": 172032
+        },
+        {
+          "relpath": "s07/part-167.dat",
+          "md5": "5878a7ab84fb43402106c575658472fa",
+          "size": 171008
+        },
+        {
+          "relpath": "s06/part-166.dat",
+          "md5": "7e7757b1e12abcb736ab9a754ffb617a",
+          "size": 169984
+        },
+        {
+          "relpath": "S05/part-165.dat",
+          "md5": "9766527f2b5d3e95d4a733fcfb77bd7e",
+          "size": 168960
+        },
+        {
+          "relpath": "s04/part-164.dat",
+          "md5": "fa7cdfad1a5aaf8370ebeda47a1ff1c3",
+          "size": 167936
+        },
+        {
+          "relpath": "s03/part-163.dat",
+          "md5": "0777d5c17d4066b82ab86dff8a46af6f",
+          "size": 166912
+        },
+        {
+          "relpath": "S02/part-162.dat",
+          "md5": "82aa4b0af34c2313a562076992e50aa3",
+          "size": 165888
+        },
+        {
+          "relpath": "s01/part-161.dat",
+          "md5": "bd4c9ab730f5513206b999ec0d90d1fb",
+          "size": 164864
+        },
+        {
+          "relpath": "s00/part-160.dat",
+          "md5": "b73ce398c39f506af761d2277d853a92",
+          "size": 163840
+        },
+        {
+          "relpath": "S19/part-159.dat",
+          "md5": "140f6969d5213fd0ece03148e62e461e",
+          "size": 162816
+        },
+        {
+          "relpath": "s18/part-158.dat",
+          "md5": "06409663226af2f3114485aa4e0a23b4",
+          "size": 161792
+        },
+        {
+          "relpath": "s17/part-157.dat",
+          "md5": "6c4b761a28b734fe93831e3fb400ce87",
+          "size": 160768
+        },
+        {
+          "relpath": "S16/part-156.dat",
+          "md5": "1c9ac0159c94d8d0cbedc973445af2da",
+          "size": 159744
+        },
+        {
+          "relpath": "s15/part-155.dat",
+          "md5": "2a79ea27c279e471f4d180b08d62b00a",
+          "size": 158720
+        },
+        {
+          "relpath": "s14/part-154.dat",
+          "md5": "1d7f7abc18fcb43975065399b0d1e48e",
+          "size": 157696
+        },
+        {
+          "relpath": "S13/part-153.dat",
+          "md5": "b3e3e393c77e35a4a3f3cbd1e429b5dc",
+          "size": 156672
+        },
+        {
+          "relpath": "s12/part-152.dat",
+          "md5": "37a749d808e46495a8da1e5352d03cae",
+          "size": 155648
+        },
+        {
+          "relpath": "s11/part-151.dat",
+          "md5": "a8f15eda80c50adb0e71943adc8015cf",
+          "size": 154624
+        },
+        {
+          "relpath": "S10/part-150.dat",
+          "md5": "7ef605fc8dba5425d6965fbd4c8fbe1f",
+          "size": 153600
+        },
+        {
+          "relpath": "s09/part-149.dat",
+          "md5": "f2217062e9a397a1dca429e7d70bc6ca",
+          "size": 152576
+        },
+        {
+          "relpath": "s08/part-148.dat",
+          "md5": "47d1e990583c9c67424d369f3414728e",
+          "size": 151552
+        },
+        {
+          "relpath": "S07/part-147.dat",
+          "md5": "8d5e957f297893487bd98fa830fa6413",
+          "size": 150528
+        },
+        {
+          "relpath": "s06/part-146.dat",
+          "md5": "a5e00132373a7031000fd987a3c9f87b",
+          "size": 149504
+        },
+        {
+          "relpath": "s05/part-145.dat",
+          "md5": "2b24d495052a8ce66358eb576b8912c8",
+          "size": 148480
+        },
+        {
+          "relpath": "S04/part-144.dat",
+          "md5": "0a09c8844ba8f0936c20bd791130d6b6",
+          "size": 147456
+        },
+        {
+          "relpath": "s03/part-143.dat",
+          "md5": "903ce9225fca3e988c2af215d4e544d3",
+          "size": 146432
+        },
+        {
+          "relpath": "s02/part-142.dat",
+          "md5": "a8baa56554f96369ab93e4f3bb068c22",
+          "size": 145408
+        },
+        {
+          "relpath": "S01/part-141.dat",
+          "md5": "0f28b5d49b3020afeecd95b4009adf4c",
+          "size": 144384
+        },
+        {
+          "relpath": "s00/part-140.dat",
+          "md5": "1385974ed5904a438616ff7bdb3f7439",
+          "size": 143360
+        },
+        {
+          "relpath": "s19/part-139.dat",
+          "md5": "e00da03b685a0dd18fb6a08af0923de0",
+          "size": 142336
+        },
+        {
+          "relpath": "S18/part-138.dat",
+          "md5": "013d407166ec4fa56eb1e1f8cbe183b9",
+          "size": 141312
+        },
+        {
+          "relpath": "s17/part-137.dat",
+          "md5": "3988c7f88ebcb58c6ce932b957b6f332",
+          "size": 140288
+        },
+        {
+          "relpath": "s16/part-136.dat",
+          "md5": "42a0e188f5033bc65bf8d78622277c4e",
+          "size": 139264
+        },
+        {
+          "relpath": "S15/part-135.dat",
+          "md5": "7f1de29e6da19d22b51c68001e7e0e54",
+          "size": 138240
+        },
+        {
+          "relpath": "s14/part-134.dat",
+          "md5": "02522a2b2726fb0a03bb19f2d8d9524d",
+          "size": 137216
+        },
+        {
+          "relpath": "s13/part-133.dat",
+          "md5": "9fc3d7152ba9336a670e36d0ed79bc43",
+          "size": 136192
+        },
+        {
+          "relpath": "S12/part-132.dat",
+          "md5": "65ded5353c5ee48d0b7d48c591b8f430",
+          "size": 135168
+        },
+        {
+          "relpath": "s11/part-131.dat",
+          "md5": "1afa34a7f984eeabdbb0a7d494132ee5",
+          "size": 134144
+        },
+        {
+          "relpath": "s10/part-130.dat",
+          "md5": "9b8619251a19057cff70779273e95aa6",
+          "size": 133120
+        },
+        {
+          "relpath": "S09/part-129.dat",
+          "md5": "d1f491a404d6854880943e5c3cd9ca25",
+          "size": 132096
+        },
+        {
+          "relpath": "s08/part-128.dat",
+          "md5": "76dc611d6ebaafc66cc0879c71b5db5c",
+          "size": 131072
+        },
+        {
+          "relpath": "s07/part-127.dat",
+          "md5": "ec5decca5ed3d6b8079e2e7e7bacc9f2",
+          "size": 130048
+        },
+        {
+          "relpath": "S06/part-126.dat",
+          "md5": "069059b7ef840f0c74a814ec9237b6ec",
+          "size": 129024
+        },
+        {
+          "relpath": "s05/part-125.dat",
+          "md5": "3def184ad8f4755ff269862ea77393dd",
+          "size": 128000
+        },
+        {
+          "relpath": "s04/part-124.dat",
+          "md5": "c8ffe9a587b126f152ed3d89a146b445",
+          "size": 126976
+        },
+        {
+          "relpath": "S03/part-123.dat",
+          "md5": "202cb962ac59075b964b07152d234b70",
+          "size": 125952
+        },
+        {
+          "relpath": "s02/part-122.dat",
+          "md5": "a0a080f42e6f13b3a2df133f073095dd",
+          "size": 124928
+        },
+        {
+          "relpath": "s01/part-121.dat",
+          "md5": "4c56ff4ce4aaf9573aa5dff913df997a",
+          "size": 123904
+        },
+        {
+          "relpath": "S00/part-120.dat",
+          "md5": "da4fb5c6e93e74d3df8527599fa62642",
+          "size": 122880
+        },
+        {
+          "relpath": "s19/part-119.dat",
+          "md5": "07e1cd7dca89a1678042477183b7ac3f",
+          "size": 121856
+        },
+        {
+          "relpath": "s18/part-118.dat",
+          "md5": "5ef059938ba799aaa845e1c2e8a762bd",
+          "size": 120832
+        },
+        {
+          "relpath": "S17/part-117.dat",
+          "md5": "eb160de1de89d9058fcb0b968dbbbd68",
+          "size": 119808
+        },
+        {
+          "relpath": "s16/part-116.dat",
+          "md5": "c45147dee729311ef5b5c3003946c48f",
+          "size": 118784
+        },
+        {
+          "relpath": "s15/part-115.dat",
+          "md5": "2b44928ae11fb9384c4cf38708677c48",
+          "size": 117760
+        },
+        {
+          "relpath": "S14/part-114.dat",
+          "md5": "5fd0b37cd7dbbb00f97ba6ce92bf5add",
+          "size": 116736
+        },
+        {
+          "relpath": "s13/part-113.dat",
+          "md5": "73278a4a86960eeb576a8fd4c9ec6997",
+          "size": 115712
+        },
+        {
+          "relpath": "s12/part-112.dat",
+          "md5": "7f6ffaa6bb0b408017b62254211691b5",
+          "size": 114688
+        },
+        {
+          "relpath": "S11/part-111.dat",
+          "md5": "698d51a19d8a121ce581499d7b701668",
+          "size": 113664
+        },
+        {
+          "relpath": "s10/part-110.dat",
+          "md5": "5f93f983524def3dca464469d2cf9f3e",
+          "size": 112640
+        },
+        {
+          "relpath": "s09/part-109.dat",
+          "md5": "2723d092b63885e0d7c260cc007e8b9d",
+          "size": 111616
+        },
+        {
+          "relpath": "S08/part-108.dat",
+          "md5": "a3c65c2974270fd093ee8a9bf8ae7d0b",
+          "size": 110592
+        },
+        {
+          "relpath": "s07/part-107.dat",
+          "md5": "a97da629b098b75c294dffdc3e463904",
+          "size": 109568
+        },
+        {
+          "relpath": "s06/part-106.dat",
+          "md5": "f0935e4cd5920aa6c7c996a5ee53a70f",
+          "size": 108544
+        },
+        {
+          "relpath": "S05/part-105.dat",
+          "md5": "65b9eea6e1cc6bb9f0cd2a47751a186f",
+          "size": 107520
+        },
+        {
+          "relpath": "s04/part-104.dat",
+          "md5": "c9e1074f5b3f9fc8ea15d152add07294",
+          "size": 106496
+        },
+        {
+          "relpath": "s03/part-103.dat",
+          "md5": "6974ce5ac660610b44d9b9fed0ff9548",
+          "size": 105472
+        },
+        {
+          "relpath": "S02/part-102.dat",
+          "md5": "ec8956637a99787bd197eacd77acce5e",
+          "size": 104448
+        },
+        {
+          "relpath": "s01/part-101.dat",
+          "md5": "38b3eff8baf56627478ec76a704e9b52",
+          "size": 103424
+        },
+        {
+          "relpath": "s00/part-100.dat",
+          "md5": "f899139df5e1059396431415e770c6dd",
+          "size": 102400
+        },
+        {
+          "relpath": "S19/part-099.dat",
+          "md5": "ac627ab1ccbdb62ec96e702f07f6425b",
+          "size": 101376
+        },
+        {
+          "relpath": "s18/part-098.dat",
+          "md5": "ed3d2c21991e3bef5e069713af9fa6ca",
+          "size": 100352
+        },
+        {
+          "relpath": "s17/part-097.dat",
+          "md5": "e2ef524fbf3d9fe611d5a8e90fefdc9c",
+          "size": 99328
+        },
+        {
+          "relpath": "S16/part-096.dat",
+          "md5": "26657d5ff9020d2abefe558796b99584",
+          "size": 98304
+        },
+        {
+          "relpath": "s15/part-095.dat",
+          "md5": "812b4ba287f5ee0bc9d43bbf5bbe87fb",
+          "size": 97280
+        },
+        {
+          "relpath": "s14/part-094.dat",
+          "md5": "f4b9ec30ad9f68f89b29639786cb62ef",
+          "size": 96256
+        },
+        {
+          "relpath": "S13/part-093.dat",
+          "md5": "98dce83da57b0395e163467c9dae521b",
+          "size": 95232
+        },
+        {
+          "relpath": "s12/part-092.dat",
+          "md5": "92cc227532d17e56e07902b254dfad10",
+          "size": 94208
+        },
+        {
+          "relpath": "s11/part-091.dat",
+          "md5": "54229abfcfa5649e7003b83dd4755294",
+          "size": 93184
+        },
+        {
+          "relpath": "S10/part-090.dat",
+          "md5": "8613985ec49eb8f757ae6439e879bb2a",
+          "size": 92160
+        },
+        {
+          "relpath": "s09/part-089.dat",
+          "md5": "7647966b7343c29048673252e490f736",
+          "size": 91136
+        },
+        {
+          "relpath": "s08/part-088.dat",
+          "md5": "2a38a4a9316c49e5a833517c45d31070",
+          "size": 90112
+        },
+        {
+          "relpath": "S07/part-087.dat",
+          "md5": "c7e1249ffc03eb9ded908c236bd1996d",
+          "size": 89088
+        },
+        {
+          "relpath": "s06/part-086.dat",
+          "md5": "93db85ed909c13838ff95ccfa94cebd9",
+          "size": 88064
+        },
+        {
+          "relpath": "s05/part-085.dat",
+          "md5": "3ef815416f775098fe977004015c6193",
+          "size": 87040
+        },
+        {
+          "relpath": "S04/part-084.dat",
+          "md5": "68d30a9594728bc39aa24be94b319d21",
+          "size": 86016
+        },
+        {
+          "relpath": "s03/part-083.dat",
+          "md5": "fe9fc289c3ff0af142b6d3bead98a923",
+          "size": 84992
+        },
+        {
+          "relpath": "s02/part-082.dat",
+          "md5": "9778d5d219c5080b9a6a17bef029331c",
+          "size": 83968
+        },
+        {
+          "relpath": "S01/part-081.dat",
+          "md5": "43ec517d68b6edd3015b3edc9a11367b",
+          "size": 82944
+        },
+        {
+          "relpath": "s00/part-080.dat",
+          "md5": "f033ab37c30201f73f142449d037028d",
+          "size": 81920
+        },
+        {
+          "relpath": "s19/part-079.dat",
+          "md5": "d1fe173d08e959397adf34b1d77e88d7",
+          "size": 80896
+        },
+        {
+          "relpath": "S18/part-078.dat",
+          "md5": "35f4a8d465e6e1edc05f3d8ab658c551",
+          "size": 79872
+        },
+        {
+          "relpath": "s17/part-077.dat",
+          "md5": "28dd2c7955ce926456240b2ff0100bde",
+          "size": 78848
+        },
+        {
+          "relpath": "s16/part-076.dat",
+          "md5": "fbd7939d674997cdb4692d34de8633c4",
+          "size": 77824
+        },
+        {
+          "relpath": "S15/part-075.dat",
+          "md5": "d09bf41544a3365a46c9077ebb5e35c3",
+          "size": 76800
+        },
+        {
+          "relpath": "s14/part-074.dat",
+          "md5": "ad61ab143223efbc24c7d2583be69251",
+          "size": 75776
+        },
+        {
+          "relpath": "s13/part-073.dat",
+          "md5": "d2ddea18f00665ce8623e36bd4e3c7c5",
+          "size": 74752
+        },
+        {
+          "relpath": "S12/part-072.dat",
+          "md5": "32bb90e8976aab5298d5da10fe66f21d",
+          "size": 73728
+        },
+        {
+          "relpath": "s11/part-071.dat",
+          "md5": "e2c420d928d4bf8ce0ff2ec19b371514",
+          "size": 72704
+        },
+        {
+          "relpath": "s10/part-070.dat",
+          "md5": "7cbbc409ec990f19c78c75bd1e06f215",
+          "size": 71680
+        },
+        {
+          "relpath": "S09/part-069.dat",
+          "md5": "14bfa6bb14875e45bba028a21ed38046",
+          "size": 70656
+        },
+        {
+          "relpath": "s08/part-068.dat",
+          "md5": "a3f390d88e4c41f2747bfa2f1b5f87db",
+          "size": 69632
+        },
+        {
+          "relpath": "s07/part-067.dat",
+          "md5": "735b90b4568125ed6c3f678819b6e058",
+          "size": 68608
+        },
+        {
+          "relpath": "S06/part-066.dat",
+          "md5": "3295c76acbf4caaed33c36b1b5fc2cb1",
+          "size": 67584
+        },
+        {
+          "relpath": "s05/part-065.dat",
+          "md5": "fc490ca45c00b1249bbe3554a4fdf6fb",
+          "size": 66560
+        },
+        {
+          "relpath": "s04/part-064.dat",
+          "md5": "ea5d2f1c4608232e07d3aa3d998e5135",
+          "size": 65536
+        },
+        {
+          "relpath": "S03/part-063.dat",
+          "md5": "03afdbd66e7929b125f8597834fa83a4",
+          "size": 64512
+        },
+        {
+          "relpath": "s02/part-062.dat",
+          "md5": "44f683a84163b3523afe57c2e008bc8c",
+          "size": 63488
+        },
+        {
+          "relpath": "s01/part-061.dat",
+          "md5": "7f39f8317fbdb1988ef4c628eba02591",
+          "size": 62464
+        },
+        {
+          "relpath": "S00/part-060.dat",
+          "md5": "072b030ba126b2f4b2374f342be9ed44",
+          "size": 61440
+        },
+        {
+          "relpath": "s19/part-059.dat",
+          "md5": "093f65e080a295f8076b1c5722a46aa2",
+          "size": 60416
+        },
+        {
+          "relpath": "s18/part-058.dat",
+          "md5": "66f041e16a60928b05a7e228a89c3799",
+          "size": 59392
+        },
+        {
+          "relpath": "S17/part-057.dat",
+          "md5": "72b32a1f754ba1c09b3695e0cb6cde7f",
+          "size": 58368
+        },
+        {
+          "relpath": "s16/part-056.dat",
+          "md5": "9f61408e3afb633e50cdf1b20de6f466",
+          "size": 57344
+        },
+        {
+          "relpath": "s15/part-055.dat",
+          "md5": "b53b3a3d6ab90ce0268229151c9bde11",
+          "size": 56320
+        },
+        {
+          "relpath": "S14/part-054.dat",
+          "md5": "a684eceee76fc522773286a895bc8436",
+          "size": 55296
+        },
+        {
+          "relpath": "s13/part-053.dat",
+          "md5": "d82c8d1619ad8176d665453cfb2e55f0",
+          "size": 54272
+        },
+        {
+          "relpath": "s12/part-052.dat",
+          "md5": "9a1158154dfa42caddbd0694a4e9bdc8",
+          "size": 53248
+        },
+        {
+          "relpath": "S11/part-051.dat",
+          "md5": "2838023a778dfaecdc212708f721b788",
+          "size": 52224
+        },
+        {
+          "relpath": "s10/part-050.dat",
+          "md5": "c0c7c76d30bd3dcaefc96f40275bdc0a",
+          "size": 51200
+        },
+        {
+          "relpath": "s09/part-049.dat",
+          "md5": "f457c545a9ded88f18ecee47145a72c0",
+          "size": 50176
+        },
+        {
+          "relpath": "S08/part-048.dat",
+          "md5": "642e92efb79421734881b53e1e1b18b6",
+          "size": 49152
+        },
+        {
+          "relpath": "s07/part-047.dat",
+          "md5": "67c6a1e7ce56d3d6fa748ab6d9af3fd7",
+          "size": 48128
+        },
+        {
+          "relpath": "s06/part-046.dat",
+          "md5": "d9d4f495e875a2e075a1a4a6e1b9770f",
+          "size": 47104
+        },
+        {
+          "relpath": "S05/part-045.dat",
+          "md5": "6c8349cc7260ae62e3b1396831a8398f",
+          "size": 46080
+        },
+        {
+          "relpath": "s04/part-044.dat",
+          "md5": "f7177163c833dff4b38fc8d2872f1ec6",
+          "size": 45056
+        },
+        {
+          "relpath": "s03/part-043.dat",
+          "md5": "17e62166fc8586dfa4d1bc0e1742c08b",
+          "size": 44032
+        },
+        {
+          "relpath": "S02/part-042.dat",
+          "md5": "a1d0c6e83f027327d8461063f4ac58a6",
+          "size": 43008
+        },
+        {
+          "relpath": "s01/part-041.dat",
+          "md5": "3416a75f4cea9109507cacd8e2f2aefc",
+          "size": 41984
+        },
+        {
+          "relpath": "s00/part-040.dat",
+          "md5": "d645920e395fedad7bbbed0eca3fe2e0",
+          "size": 40960
+        },
+        {
+          "relpath": "S19/part-039.dat",
+          "md5": "d67d8ab4f4c10bf22aa353e27879133c",
+          "size": 39936
+        },
+        {
+          "relpath": "s18/part-038.dat",
+          "md5": "a5771bce93e200c36f7cd9dfd0e5deaa",
+          "size": 38912
+        },
+        {
+          "relpath": "s17/part-037.dat",
+          "md5": "a5bfc9e07964f8dddeb95fc584cd965d",
+          "size": 37888
+        },
+        {
+          "relpath": "S16/part-036.dat",
+          "md5": "19ca14e7ea6328a42e0eb13d585e4c22",
+          "size": 36864
+        },
+        {
+          "relpath": "s15/part-035.dat",
+          "md5": "1c383cd30b7c298ab50293adfecb7b18",
+          "size": 35840
+        },
+        {
+          "relpath": "s14/part-034.dat",
+          "md5": "e369853df766fa44e1ed0ff613f563bd",
+          "size": 34816
+        },
+        {
+          "relpath": "S13/part-033.dat",
+          "md5": "182be0c5cdcd5072bb1864cdee4d3d6e",
+          "size": 33792
+        },
+        {
+          "relpath": "s12/part-032.dat",
+          "md5": "6364d3f0f495b6ab9dcf8d3b5c6e0b01",
+          "size": 32768
+        },
+        {
+          "relpath": "s11/part-031.dat",
+          "md5": "c16a5320fa475530d9583c34fd356ef5",
+          "size": 31744
+        },
+        {
+          "relpath": "S10/part-030.dat",
+          "md5": "34173cb38f07f89ddbebc2ac9128303f",
+          "size": 30720
+        },
+        {
+          "relpath": "s09/part-029.dat",
+          "md5": "6ea9ab1baa0efb9e19094440c317e21b",
+          "size": 29696
+        },
+        {
+          "relpath": "s08/part-028.dat",
+          "md5": "33e75ff09dd601bbe69f351039152189",
+          "size": 28672
+        },
+        {
+          "relpath": "S07/part-027.dat",
+          "md5": "02e74f10e0327ad868d138f2b4fdd6f0",
+          "size": 27648
+        },
+        {
+          "relpath": "s06/part-026.dat",
+          "md5": "4e732ced3463d06de0ca9a15b6153677",
+          "size": 26624
+        },
+        {
+          "relpath": "s05/part-025.dat",
+          "md5": "8e296a067a37563370ded05f5a3bf3ec",
+          "size": 25600
+        },
+        {
+          "relpath": "S04/part-024.dat",
+          "md5": "1ff1de774005f8da13f42943881c655f",
+          "size": 24576
+        },
+        {
+          "relpath": "s03/part-023.dat",
+          "md5": "37693cfc748049e45d87b8c7d8b9aacd",
+          "size": 23552
+        },
+        {
+          "relpath": "s02/part-022.dat",
+          "md5": "b6d767d2f8ed5d21a44b0e5886680cb9",
+          "size": 22528
+        },
+        {
+          "relpath": "S01/part-021.dat",
+          "md5": "3c59dc048e8850243be8079a5c74d079",
+          "size": 21504
+        },
+        {
+          "relpath": "s00/part-020.dat",
+          "md5": "98f13708210194c475687be6106a3b84",
+          "size": 20480
+        },
+        {
+          "relpath": "s19/part-019.dat",
+          "md5": "1f0e3dad99908345f7439f8ffabdffc4",
+          "size": 19456
+        },
+        {
+          "relpath": "S18/part-018.dat",
+          "md5": "6f4922f45568161a8cdf4ad2299f6d23",
+          "size": 18432
+        },
+        {
+          "relpath": "s17/part-017.dat",
+          "md5": "70efdf2ec9b086079795c442636b55fb",
+          "size": 17408
+        },
+        {
+          "relpath": "s16/part-016.dat",
+          "md5": "c74d97b01eae257e44aa9d5bade97baf",
+          "size": 16384
+        },
+        {
+          "relpath": "S15/part-015.dat",
+          "md5": "9bf31c7ff062936a96d3c8bd1f8f2ff3",
+          "size": 15360
+        },
+        {
+          "relpath": "s14/part-014.dat",
+          "md5": "aab3238922bcc25a6f606eb525ffdc56",
+          "size": 14336
+        },
+        {
+          "relpath": "s13/part-013.dat",
+          "md5": "c51ce410c124a10e0db5e4b97fc2af39",
+          "size": 13312
+        },
+        {
+          "relpath": "S12/part-012.dat",
+          "md5": "c20ad4d76fe97759aa27a0c99bff6710",
+          "size": 12288
+        },
+        {
+          "relpath": "s11/part-011.dat",
+          "md5": "6512bd43d9caa6e02c990b0a82652dca",
+          "size": 11264
+        },
+        {
+          "relpath": "s10/part-010.dat",
+          "md5": "d3d9446802a44259755d38e6d163e820",
+          "size": 10240
+        },
+        {
+          "relpath": "S09/part-009.dat",
+          "md5": "45c48cce2e2d7fbdea1afc51c7c6ad26",
+          "size": 9216
+        },
+        {
+          "relpath": "s08/part-008.dat",
+          "md5": "c9f0f895fb98ab9159f51fd0297e236d",
+          "size": 8192
+        },
+        {
+          "relpath": "s07/part-007.dat",
+          "md5": "8f14e45fceea167a5a36dedd4bea2543",
+          "size": 7168
+        },
+        {
+          "relpath": "S06/part-006.dat",
+          "md5": "1679091c5a880faf6fb5e6087eb1b2dc",
+          "size": 6144
+        },
+        {
+          "relpath": "s05/part-005.dat",
+          "md5": "e4da3b7fbbce2345d7772b0674a318d5",
+          "size": 5120
+        },
+        {
+          "relpath": "s04/part-004.dat",
+          "md5": "a87ff679a2f3e71d9181a67b7542122c",
+          "size": 4096
+        },
+        {
+          "relpath": "S03/part-003.dat",
+          "md5": "eccbc87e4b5ce2fe28308fd9f2a7baf3",
+          "size": 3072
+        },
+        {
+          "relpath": "s02/part-002.dat",
+          "md5": "c81e728d9d4c2f636f067f89cc14862c",
+          "size": 2048
+        },
+        {
+          "relpath": "s01/part-001.dat",
+          "md5": "c4ca4238a0b923820dcc509a6f75849b",
+          "size": 1024
+        },
+        {
+          "relpath": "S00/part-000.dat",
+          "md5": "cfcd208495d565ef66e7dff9f98764da",
+          "size": 0
+        }
+      ],
+      "canonical": "[{\"md5\":\"cfcd208495d565ef66e7dff9f98764da\",\"relpath\":\"S00/part-000.dat\",\"size\":0},{\"md5\":\"072b030ba126b2f4b2374f342be9ed44\",\"relpath\":\"S00/part-060.dat\",\"size\":61440},{\"md5\":\"da4fb5c6e93e74d3df8527599fa62642\",\"relpath\":\"S00/part-120.dat\",\"size\":122880},{\"md5\":\"045117b0e0a11a242b9765e79cbf113f\",\"relpath\":\"S00/part-180.dat\",\"size\":184320},{\"md5\":\"3c59dc048e8850243be8079a5c74d079\",\"relpath\":\"S01/part-021.dat\",\"size\":21504},{\"md5\":\"43ec517d68b6edd3015b3edc9a11367b\",\"relpath\":\"S01/part-081.dat\",\"size\":82944},{\"md5\":\"0f28b5d49b3020afeecd95b4009adf4c\",\"relpath\":\"S01/part-141.dat\",\"size\":144384},{\"md5\":\"a1d0c6e83f027327d8461063f4ac58a6\",\"relpath\":\"S02/part-042.dat\",\"size\":43008},{\"md5\":\"ec8956637a99787bd197eacd77acce5e\",\"relpath\":\"S02/part-102.dat\",\"size\":104448},{\"md5\":\"82aa4b0af34c2313a562076992e50aa3\",\"relpath\":\"S02/part-162.dat\",\"size\":165888},{\"md5\":\"eccbc87e4b5ce2fe28308fd9f2a7baf3\",\"relpath\":\"S03/part-003.dat\",\"size\":3072},{\"md5\":\"03afdbd66e7929b125f8597834fa83a4\",\"relpath\":\"S03/part-063.dat\",\"size\":64512},{\"md5\":\"202cb962ac59075b964b07152d234b70\",\"relpath\":\"S03/part-123.dat\",\"size\":125952},{\"md5\":\"cedebb6e872f539bef8c3f919874e9d7\",\"relpath\":\"S03/part-183.dat\",\"size\":187392},{\"md5\":\"1ff1de774005f8da13f42943881c655f\",\"relpath\":\"S04/part-024.dat\",\"size\":24576},{\"md5\":\"68d30a9594728bc39aa24be94b319d21\",\"relpath\":\"S04/part-084.dat\",\"size\":86016},{\"md5\":\"0a09c8844ba8f0936c20bd791130d6b6\",\"relpath\":\"S04/part-144.dat\",\"size\":147456},{\"md5\":\"6c8349cc7260ae62e3b1396831a8398f\",\"relpath\":\"S05/part-045.dat\",\"size\":46080},{\"md5\":\"65b9eea6e1cc6bb9f0cd2a47751a186f\",\"relpath\":\"S05/part-105.dat\",\"size\":107520},{\"md5\":\"9766527f2b5d3e95d4a733fcfb77bd7e\",\"relpath\":\"S05/part-165.dat\",\"size\":168960},{\"md5\":\"1679091c5a880faf6fb5e6087eb1b2dc\",\"relpath\":\"S06/part-006.dat\",\"size\":6144},{\"md5\":\"3295c76acbf4caaed33c36b1b5fc2cb1\",\"relpath\":\"S06/part-066.dat\",\"size\":67584},{\"md5\":\"069059b7ef840f0c74a814ec9237b6ec\",\"relpath\":\"S06/part-126.dat\",\"size\":129024},{\"md5\":\"9872ed9fc22fc182d371c3e9ed316094\",\"relpath\":\"S06/part-186.dat\",\"size\":190464},{\"md5\":\"02e74f10e0327ad868d138f2b4fdd6f0\",\"relpath\":\"S07/part-027.dat\",\"size\":27648},{\"md5\":\"c7e1249ffc03eb9ded908c236bd1996d\",\"relpath\":\"S07/part-087.dat\",\"size\":89088},{\"md5\":\"8d5e957f297893487bd98fa830fa6413\",\"relpath\":\"S07/part-147.dat\",\"size\":150528},{\"md5\":\"642e92efb79421734881b53e1e1b18b6\",\"relpath\":\"S08/part-048.dat\",\"size\":49152},{\"md5\":\"a3c65c2974270fd093ee8a9bf8ae7d0b\",\"relpath\":\"S08/part-108.dat\",\"size\":110592},{\"md5\":\"006f52e9102a8d3be2fe5614f42ba989\",\"relpath\":\"S08/part-168.dat\",\"size\":172032},{\"md5\":\"45c48cce2e2d7fbdea1afc51c7c6ad26\",\"relpath\":\"S09/part-009.dat\",\"size\":9216},{\"md5\":\"14bfa6bb14875e45bba028a21ed38046\",\"relpath\":\"S09/part-069.dat\",\"size\":70656},{\"md5\":\"d1f491a404d6854880943e5c3cd9ca25\",\"relpath\":\"S09/part-129.dat\",\"size\":132096},{\"md5\":\"a2557a7b2e94197ff767970b67041697\",\"relpath\":\"S09/part-189.dat\",\"size\":193536},{\"md5\":\"34173cb38f07f89ddbebc2ac9128303f\",\"relpath\":\"S10/part-030.dat\",\"size\":30720},{\"md5\":\"8613985ec49eb8f757ae6439e879bb2a\",\"relpath\":\"S10/part-090.dat\",\"size\":92160},{\"md5\":\"7ef605fc8dba5425d6965fbd4c8fbe1f\",\"relpath\":\"S10/part-150.dat\",\"size\":153600},{\"md5\":\"2838023a778dfaecdc212708f721b788\",\"relpath\":\"S11/part-051.dat\",\"size\":52224},{\"md5\":\"698d51a19d8a121ce581499d7b701668\",\"relpath\":\"S11/part-111.dat\",\"size\":113664},{\"md5\":\"a4a042cf4fd6bfb47701cbc8a1653ada\",\"relpath\":\"S11/part-171.dat\",\"size\":175104},{\"md5\":\"c20ad4d76fe97759aa27a0c99bff6710\",\"relpath\":\"S12/part-012.dat\",\"size\":12288},{\"md5\":\"32bb90e8976aab5298d5da10fe66f21d\",\"relpath\":\"S12/part-072.dat\",\"size\":73728},{\"md5\":\"65ded5353c5ee48d0b7d48c591b8f430\",\"relpath\":\"S12/part-132.dat\",\"size\":135168},{\"md5\":\"58a2fc6ed39fd083f55d4182bf88826d\",\"relpath\":\"S12/part-192.dat\",\"size\":196608},{\"md5\":\"182be0c5cdcd5072bb1864cdee4d3d6e\",\"relpath\":\"S13/part-033.dat\",\"size\":33792},{\"md5\":\"98dce83da57b0395e163467c9dae521b\",\"relpath\":\"S13/part-093.dat\",\"size\":95232},{\"md5\":\"b3e3e393c77e35a4a3f3cbd1e429b5dc\",\"relpath\":\"S13/part-153.dat\",\"size\":156672},{\"md5\":\"a684eceee76fc522773286a895bc8436\",\"relpath\":\"S14/part-054.dat\",\"size\":55296},{\"md5\":\"5fd0b37cd7dbbb00f97ba6ce92bf5add\",\"relpath\":\"S14/part-114.dat\",\"size\":116736},{\"md5\":\"bf8229696f7a3bb4700cfddef19fa23f\",\"relpath\":\"S14/part-174.dat\",\"size\":178176},{\"md5\":\"9bf31c7ff062936a96d3c8bd1f8f2ff3\",\"relpath\":\"S15/part-015.dat\",\"size\":15360},{\"md5\":\"d09bf41544a3365a46c9077ebb5e35c3\",\"relpath\":\"S15/part-075.dat\",\"size\":76800},{\"md5\":\"7f1de29e6da19d22b51c68001e7e0e54\",\"relpath\":\"S15/part-135.dat\",\"size\":138240},{\"md5\":\"0336dcbab05b9d5ad24f4333c7658a0e\",\"relpath\":\"S15/part-195.dat\",\"size\":199680},{\"md5\":\"19ca14e7ea6328a42e0eb13d585e4c22\",\"relpath\":\"S16/part-036.dat\",\"size\":36864},{\"md5\":\"26657d5ff9020d2abefe558796b99584\",\"relpath\":\"S16/part-096.dat\",\"size\":98304},{\"md5\":\"1c9ac0159c94d8d0cbedc973445af2da\",\"relpath\":\"S16/part-156.dat\",\"size\":159744},{\"md5\":\"72b32a1f754ba1c09b3695e0cb6cde7f\",\"relpath\":\"S17/part-057.dat\",\"size\":58368},{\"md5\":\"eb160de1de89d9058fcb0b968dbbbd68\",\"relpath\":\"S17/part-117.dat\",\"size\":119808},{\"md5\":\"96da2f590cd7246bbde0051047b0d6f7\",\"relpath\":\"S17/part-177.dat\",\"size\":181248},{\"md5\":\"6f4922f45568161a8cdf4ad2299f6d23\",\"relpath\":\"S18/part-018.dat\",\"size\":18432},{\"md5\":\"35f4a8d465e6e1edc05f3d8ab658c551\",\"relpath\":\"S18/part-078.dat\",\"size\":79872},{\"md5\":\"013d407166ec4fa56eb1e1f8cbe183b9\",\"relpath\":\"S18/part-138.dat\",\"size\":141312},{\"md5\":\"0e65972dce68dad4d52d063967f0a705\",\"relpath\":\"S18/part-198.dat\",\"size\":202752},{\"md5\":\"d67d8ab4f4c10bf22aa353e27879133c\",\"relpath\":\"S19/part-039.dat\",\"size\":39936},{\"md5\":\"ac627ab1ccbdb62ec96e702f07f6425b\",\"relpath\":\"S19/part-099.dat\",\"size\":101376},{\"md5\":\"140f6969d5213fd0ece03148e62e461e\",\"relpath\":\"S19/part-159.dat\",\"size\":162816},{\"md5\":\"98f13708210194c475687be6106a3b84\",\"relpath\":\"s00/part-020.dat\",\"size\":20480},{\"md5\":\"d645920e395fedad7bbbed0eca3fe2e0\",\"relpath\":\"s00/part-040.dat\",\"size\":40960},{\"md5\":\"f033ab37c30201f73f142449d037028d\",\"relpath\":\"s00/part-080.dat\",\"size\":81920},{\"md5\":\"f899139df5e1059396431415e770c6dd\",\"relpath\":\"s00/part-100.dat\",\"size\":102400},{\"md5\":\"1385974ed5904a438616ff7bdb3f7439\",\"relpath\":\"s00/part-140.dat\",\"size\":143360},{\"md5\":\"b73ce398c39f506af761d2277d853a92\",\"relpath\":\"s00/part-160.dat\",\"size\":163840},{\"md5\":\"c4ca4238a0b923820dcc509a6f75849b\",\"relpath\":\"s01/part-001.dat\",\"size\":1024},{\"md5\":\"3416a75f4cea9109507cacd8e2f2aefc\",\"relpath\":\"s01/part-041.dat\",\"size\":41984},{\"md5\":\"7f39f8317fbdb1988ef4c628eba02591\",\"relpath\":\"s01/part-061.dat\",\"size\":62464},{\"md5\":\"38b3eff8baf56627478ec76a704e9b52\",\"relpath\":\"s01/part-101.dat\",\"size\":103424},{\"md5\":\"4c56ff4ce4aaf9573aa5dff913df997a\",\"relpath\":\"s01/part-121.dat\",\"size\":123904},{\"md5\":\"bd4c9ab730f5513206b999ec0d90d1fb\",\"relpath\":\"s01/part-161.dat\",\"size\":164864},{\"md5\":\"fc221309746013ac554571fbd180e1c8\",\"relpath\":\"s01/part-181.dat\",\"size\":185344},{\"md5\":\"c81e728d9d4c2f636f067f89cc14862c\",\"relpath\":\"s02/part-002.dat\",\"size\":2048},{\"md5\":\"b6d767d2f8ed5d21a44b0e5886680cb9\",\"relpath\":\"s02/part-022.dat\",\"size\":22528},{\"md5\":\"44f683a84163b3523afe57c2e008bc8c\",\"relpath\":\"s02/part-062.dat\",\"size\":63488},{\"md5\":\"9778d5d219c5080b9a6a17bef029331c\",\"relpath\":\"s02/part-082.dat\",\"size\":83968},{\"md5\":\"a0a080f42e6f13b3a2df133f073095dd\",\"relpath\":\"s02/part-122.dat\",\"size\":124928},{\"md5\":\"a8baa56554f96369ab93e4f3bb068c22\",\"relpath\":\"s02/part-142.dat\",\"size\":145408},{\"md5\":\"4c5bde74a8f110656874902f07378009\",\"relpath\":\"s02/part-182.dat\",\"size\":186368},{\"md5\":\"37693cfc748049e45d87b8c7d8b9aacd\",\"relpath\":\"s03/part-023.dat\",\"size\":23552},{\"md5\":\"17e62166fc8586dfa4d1bc0e1742c08b\",\"relpath\":\"s03/part-043.dat\",\"size\":44032},{\"md5\":\"fe9fc289c3ff0af142b6d3bead98a923\",\"relpath\":\"s03/part-083.dat\",\"size\":84992},{\"md5\":\"6974ce5ac660610b44d9b9fed0ff9548\",\"relpath\":\"s03/part-103.dat\",\"size\":105472},{\"md5\":\"903ce9225fca3e988c2af215d4e544d3\",\"relpath\":\"s03/part-143.dat\",\"size\":146432},{\"md5\":\"0777d5c17d4066b82ab86dff8a46af6f\",\"relpath\":\"s03/part-163.dat\",\"size\":166912},{\"md5\":\"a87ff679a2f3e71d9181a67b7542122c\",\"relpath\":\"s04/part-004.dat\",\"size\":4096},{\"md5\":\"f7177163c833dff4b38fc8d2872f1ec6\",\"relpath\":\"s04/part-044.dat\",\"size\":45056},{\"md5\":\"ea5d2f1c4608232e07d3aa3d998e5135\",\"relpath\":\"s04/part-064.dat\",\"size\":65536},{\"md5\":\"c9e1074f5b3f9fc8ea15d152add07294\",\"relpath\":\"s04/part-104.dat\",\"size\":106496},{\"md5\":\"c8ffe9a587b126f152ed3d89a146b445\",\"relpath\":\"s04/part-124.dat\",\"size\":126976},{\"md5\":\"fa7cdfad1a5aaf8370ebeda47a1ff1c3\",\"relpath\":\"s04/part-164.dat\",\"size\":167936},{\"md5\":\"6cdd60ea0045eb7a6ec44c54d29ed402\",\"relpath\":\"s04/part-184.dat\",\"size\":188416},{\"md5\":\"e4da3b7fbbce2345d7772b0674a318d5\",\"relpath\":\"s05/part-005.dat\",\"size\":5120},{\"md5\":\"8e296a067a37563370ded05f5a3bf3ec\",\"relpath\":\"s05/part-025.dat\",\"size\":25600},{\"md5\":\"fc490ca45c00b1249bbe3554a4fdf6fb\",\"relpath\":\"s05/part-065.dat\",\"size\":66560},{\"md5\":\"3ef815416f775098fe977004015c6193\",\"relpath\":\"s05/part-085.dat\",\"size\":87040},{\"md5\":\"3def184ad8f4755ff269862ea77393dd\",\"relpath\":\"s05/part-125.dat\",\"size\":128000},{\"md5\":\"2b24d495052a8ce66358eb576b8912c8\",\"relpath\":\"s05/part-145.dat\",\"size\":148480},{\"md5\":\"eecca5b6365d9607ee5a9d336962c534\",\"relpath\":\"s05/part-185.dat\",\"size\":189440},{\"md5\":\"4e732ced3463d06de0ca9a15b6153677\",\"relpath\":\"s06/part-026.dat\",\"size\":26624},{\"md5\":\"d9d4f495e875a2e075a1a4a6e1b9770f\",\"relpath\":\"s06/part-046.dat\",\"size\":47104},{\"md5\":\"93db85ed909c13838ff95ccfa94cebd9\",\"relpath\":\"s06/part-086.dat\",\"size\":88064},{\"md5\":\"f0935e4cd5920aa6c7c996a5ee53a70f\",\"relpath\":\"s06/part-106.dat\",\"size\":108544},{\"md5\":\"a5e00132373a7031000fd987a3c9f87b\",\"relpath\":\"s06/part-146.dat\",\"size\":149504},{\"md5\":\"7e7757b1e12abcb736ab9a754ffb617a\",\"relpath\":\"s06/part-166.dat\",\"size\":169984},{\"md5\":\"8f14e45fceea167a5a36dedd4bea2543\",\"relpath\":\"s07/part-007.dat\",\"size\":7168},{\"md5\":\"67c6a1e7ce56d3d6fa748ab6d9af3fd7\",\"relpath\":\"s07/part-047.dat\",\"size\":48128},{\"md5\":\"735b90b4568125ed6c3f678819b6e058\",\"relpath\":\"s07/part-067.dat\",\"size\":68608},{\"md5\":\"a97da629b098b75c294dffdc3e463904\",\"relpath\":\"s07/part-107.dat\",\"size\":109568},{\"md5\":\"ec5decca5ed3d6b8079e2e7e7bacc9f2\",\"relpath\":\"s07/part-127.dat\",\"size\":130048},{\"md5\":\"5878a7ab84fb43402106c575658472fa\",\"relpath\":\"s07/part-167.dat\",\"size\":171008},{\"md5\":\"31fefc0e570cb3860f2a6d4b38c6490d\",\"relpath\":\"s07/part-187.dat\",\"size\":191488},{\"md5\":\"c9f0f895fb98ab9159f51fd0297e236d\",\"relpath\":\"s08/part-008.dat\",\"size\":8192},{\"md5\":\"33e75ff09dd601bbe69f351039152189\",\"relpath\":\"s08/part-028.dat\",\"size\":28672},{\"md5\":\"a3f390d88e4c41f2747bfa2f1b5f87db\",\"relpath\":\"s08/part-068.dat\",\"size\":69632},{\"md5\":\"2a38a4a9316c49e5a833517c45d31070\",\"relpath\":\"s08/part-088.dat\",\"size\":90112},{\"md5\":\"76dc611d6ebaafc66cc0879c71b5db5c\",\"relpath\":\"s08/part-128.dat\",\"size\":131072},{\"md5\":\"47d1e990583c9c67424d369f3414728e\",\"relpath\":\"s08/part-148.dat\",\"size\":151552},{\"md5\":\"9dcb88e0137649590b755372b040afad\",\"relpath\":\"s08/part-188.dat\",\"size\":192512},{\"md5\":\"6ea9ab1baa0efb9e19094440c317e21b\",\"relpath\":\"s09/part-029.dat\",\"size\":29696},{\"md5\":\"f457c545a9ded88f18ecee47145a72c0\",\"relpath\":\"s09/part-049.dat\",\"size\":50176},{\"md5\":\"7647966b7343c29048673252e490f736\",\"relpath\":\"s09/part-089.dat\",\"size\":91136},{\"md5\":\"2723d092b63885e0d7c260cc007e8b9d\",\"relpath\":\"s09/part-109.dat\",\"size\":111616},{\"md5\":\"f2217062e9a397a1dca429e7d70bc6ca\",\"relpath\":\"s09/part-149.dat\",\"size\":152576},{\"md5\":\"3636638817772e42b59d74cff571fbb3\",\"relpath\":\"s09/part-169.dat\",\"size\":173056},{\"md5\":\"d3d9446802a44259755d38e6d163e820\",\"relpath\":\"s10/part-010.dat\",\"size\":10240},{\"md5\":\"c0c7c76d30bd3dcaefc96f40275bdc0a\",\"relpath\":\"s10/part-050.dat\",\"size\":51200},{\"md5\":\"7cbbc409ec990f19c78c75bd1e06f215\",\"relpath\":\"s10/part-070.dat\",\"size\":71680},{\"md5\":\"5f93f983524def3dca464469d2cf9f3e\",\"relpath\":\"s10/part-110.dat\",\"size\":112640},{\"md5\":\"9b8619251a19057cff70779273e95aa6\",\"relpath\":\"s10/part-130.dat\",\"size\":133120},{\"md5\":\"149e9677a5989fd342ae44213df68868\",\"relpath\":\"s10/part-170.dat\",\"size\":174080},{\"md5\":\"cfecdb276f634854f3ef915e2e980c31\",\"relpath\":\"s10/part-190.dat\",\"size\":194560},{\"md5\":\"6512bd43d9caa6e02c990b0a82652dca\",\"relpath\":\"s11/part-011.dat\",\"size\":11264},{\"md5\":\"c16a5320fa475530d9583c34fd356ef5\",\"relpath\":\"s11/part-031.dat\",\"size\":31744},{\"md5\":\"e2c420d928d4bf8ce0ff2ec19b371514\",\"relpath\":\"s11/part-071.dat\",\"size\":72704},{\"md5\":\"54229abfcfa5649e7003b83dd4755294\",\"relpath\":\"s11/part-091.dat\",\"size\":93184},{\"md5\":\"1afa34a7f984eeabdbb0a7d494132ee5\",\"relpath\":\"s11/part-131.dat\",\"size\":134144},{\"md5\":\"a8f15eda80c50adb0e71943adc8015cf\",\"relpath\":\"s11/part-151.dat\",\"size\":154624},{\"md5\":\"0aa1883c6411f7873cb83dacb17b0afc\",\"relpath\":\"s11/part-191.dat\",\"size\":195584},{\"md5\":\"6364d3f0f495b6ab9dcf8d3b5c6e0b01\",\"relpath\":\"s12/part-032.dat\",\"size\":32768},{\"md5\":\"9a1158154dfa42caddbd0694a4e9bdc8\",\"relpath\":\"s12/part-052.dat\",\"size\":53248},{\"md5\":\"92cc227532d17e56e07902b254dfad10\",\"relpath\":\"s12/part-092.dat\",\"size\":94208},{\"md5\":\"7f6ffaa6bb0b408017b62254211691b5\",\"relpath\":\"s12/part-112.dat\",\"size\":114688},{\"md5\":\"37a749d808e46495a8da1e5352d03cae\",\"relpath\":\"s12/part-152.dat\",\"size\":155648},{\"md5\":\"1ff8a7b5dc7a7d1f0ed65aaa29c04b1e\",\"relpath\":\"s12/part-172.dat\",\"size\":176128},{\"md5\":\"c51ce410c124a10e0db5e4b97fc2af39\",\"relpath\":\"s13/part-013.dat\",\"size\":13312},{\"md5\":\"d82c8d1619ad8176d665453cfb2e55f0\",\"relpath\":\"s13/part-053.dat\",\"size\":54272},{\"md5\":\"d2ddea18f00665ce8623e36bd4e3c7c5\",\"relpath\":\"s13/part-073.dat\",\"size\":74752},{\"md5\":\"73278a4a86960eeb576a8fd4c9ec6997\",\"relpath\":\"s13/part-113.dat\",\"size\":115712},{\"md5\":\"9fc3d7152ba9336a670e36d0ed79bc43\",\"relpath\":\"s13/part-133.dat\",\"size\":136192},{\"md5\":\"f7e6c85504ce6e82442c770f7c8606f0\",\"relpath\":\"s13/part-173.dat\",\"size\":177152},{\"md5\":\"bd686fd640be98efaae0091fa301e613\",\"relpath\":\"s13/part-193.dat\",\"size\":197632},{\"md5\":\"aab3238922bcc25a6f606eb525ffdc56\",\"relpath\":\"s14/part-014.dat\",\"size\":14336},{\"md5\":\"e369853df766fa44e1ed0ff613f563bd\",\"relpath\":\"s14/part-034.dat\",\"size\":34816},{\"md5\":\"ad61ab143223efbc24c7d2583be69251\",\"relpath\":\"s14/part-074.dat\",\"size\":75776},{\"md5\":\"f4b9ec30ad9f68f89b29639786cb62ef\",\"relpath\":\"s14/part-094.dat\",\"size\":96256},{\"md5\":\"02522a2b2726fb0a03bb19f2d8d9524d\",\"relpath\":\"s14/part-134.dat\",\"size\":137216},{\"md5\":\"1d7f7abc18fcb43975065399b0d1e48e\",\"relpath\":\"s14/part-154.dat\",\"size\":157696},{\"md5\":\"a597e50502f5ff68e3e25b9114205d4a\",\"relpath\":\"s14/part-194.dat\",\"size\":198656},{\"md5\":\"1c383cd30b7c298ab50293adfecb7b18\",\"relpath\":\"s15/part-035.dat\",\"size\":35840},{\"md5\":\"b53b3a3d6ab90ce0268229151c9bde11\",\"relpath\":\"s15/part-055.dat\",\"size\":56320},{\"md5\":\"812b4ba287f5ee0bc9d43bbf5bbe87fb\",\"relpath\":\"s15/part-095.dat\",\"size\":97280},{\"md5\":\"2b44928ae11fb9384c4cf38708677c48\",\"relpath\":\"s15/part-115.dat\",\"size\":117760},{\"md5\":\"2a79ea27c279e471f4d180b08d62b00a\",\"relpath\":\"s15/part-155.dat\",\"size\":158720},{\"md5\":\"82161242827b703e6acf9c726942a1e4\",\"relpath\":\"s15/part-175.dat\",\"size\":179200},{\"md5\":\"c74d97b01eae257e44aa9d5bade97baf\",\"relpath\":\"s16/part-016.dat\",\"size\":16384},{\"md5\":\"9f61408e3afb633e50cdf1b20de6f466\",\"relpath\":\"s16/part-056.dat\",\"size\":57344},{\"md5\":\"fbd7939d674997cdb4692d34de8633c4\",\"relpath\":\"s16/part-076.dat\",\"size\":77824},{\"md5\":\"c45147dee729311ef5b5c3003946c48f\",\"relpath\":\"s16/part-116.dat\",\"size\":118784},{\"md5\":\"42a0e188f5033bc65bf8d78622277c4e\",\"relpath\":\"s16/part-136.dat\",\"size\":139264},{\"md5\":\"38af86134b65d0f10fe33d30dd76442e\",\"relpath\":\"s16/part-176.dat\",\"size\":180224},{\"md5\":\"084b6fbb10729ed4da8c3d3f5a3ae7c9\",\"relpath\":\"s16/part-196.dat\",\"size\":200704},{\"md5\":\"70efdf2ec9b086079795c442636b55fb\",\"relpath\":\"s17/part-017.dat\",\"size\":17408},{\"md5\":\"a5bfc9e07964f8dddeb95fc584cd965d\",\"relpath\":\"s17/part-037.dat\",\"size\":37888},{\"md5\":\"28dd2c7955ce926456240b2ff0100bde\",\"relpath\":\"s17/part-077.dat\",\"size\":78848},{\"md5\":\"e2ef524fbf3d9fe611d5a8e90fefdc9c\",\"relpath\":\"s17/part-097.dat\",\"size\":99328},{\"md5\":\"3988c7f88ebcb58c6ce932b957b6f332\",\"relpath\":\"s17/part-137.dat\",\"size\":140288},{\"md5\":\"6c4b761a28b734fe93831e3fb400ce87\",\"relpath\":\"s17/part-157.dat\",\"size\":160768},{\"md5\":\"85d8ce590ad8981ca2c8286f79f59954\",\"relpath\":\"s17/part-197.dat\",\"size\":201728},{\"md5\":\"a5771bce93e200c36f7cd9dfd0e5deaa\",\"relpath\":\"s18/part-038.dat\",\"size\":38912},{\"md5\":\"66f041e16a60928b05a7e228a89c3799\",\"relpath\":\"s18/part-058.dat\",\"size\":59392},{\"md5\":\"ed3d2c21991e3bef5e069713af9fa6ca\",\"relpath\":\"s18/part-098.dat\",\"size\":100352},{\"md5\":\"5ef059938ba799aaa845e1c2e8a762bd\",\"relpath\":\"s18/part-118.dat\",\"size\":120832},{\"md5\":\"06409663226af2f3114485aa4e0a23b4\",\"relpath\":\"s18/part-158.dat\",\"size\":161792},{\"md5\":\"8f85517967795eeef66c225f7883bdcb\",\"relpath\":\"s18/part-178.dat\",\"size\":182272},{\"md5\":\"1f0e3dad99908345f7439f8ffabdffc4\",\"relpath\":\"s19/part-019.dat\",\"size\":19456},{\"md5\":\"093f65e080a295f8076b1c5722a46aa2\",\"relpath\":\"s19/part-059.dat\",\"size\":60416},{\"md5\":\"d1fe173d08e959397adf34b1d77e88d7\",\"relpath\":\"s19/part-079.dat\",\"size\":80896},{\"md5\":\"07e1cd7dca89a1678042477183b7ac3f\",\"relpath\":\"s19/part-119.dat\",\"size\":121856},{\"md5\":\"e00da03b685a0dd18fb6a08af0923de0\",\"relpath\":\"s19/part-139.dat\",\"size\":142336},{\"md5\":\"8f53295a73878494e9bc8dd6c3c7104f\",\"relpath\":\"s19/part-179.dat\",\"size\":183296},{\"md5\":\"84d9ee44e457ddef7f2c4f25dc8fa865\",\"relpath\":\"s19/part-199.dat\",\"size\":203776}]",
+      "canonical_utf8_bytes": 17090,
+      "canonical_sha256": "4cffb9ebc92cc176a1b3925cbe15e7d714984dda674f4dfd7e26bf8b9c2b87fc",
+      "body_hash": "1bff434805ed75c1117e7f2bd288b41c",
+      "dvc_dir": "[{\"md5\": \"cfcd208495d565ef66e7dff9f98764da\", \"relpath\": \"S00/part-000.dat\"}, {\"md5\": \"072b030ba126b2f4b2374f342be9ed44\", \"relpath\": \"S00/part-060.dat\"}, {\"md5\": \"da4fb5c6e93e74d3df8527599fa62642\", \"relpath\": \"S00/part-120.dat\"}, {\"md5\": \"045117b0e0a11a242b9765e79cbf113f\", \"relpath\": \"S00/part-180.dat\"}, {\"md5\": \"3c59dc048e8850243be8079a5c74d079\", \"relpath\": \"S01/part-021.dat\"}, {\"md5\": \"43ec517d68b6edd3015b3edc9a11367b\", \"relpath\": \"S01/part-081.dat\"}, {\"md5\": \"0f28b5d49b3020afeecd95b4009adf4c\", \"relpath\": \"S01/part-141.dat\"}, {\"md5\": \"a1d0c6e83f027327d8461063f4ac58a6\", \"relpath\": \"S02/part-042.dat\"}, {\"md5\": \"ec8956637a99787bd197eacd77acce5e\", \"relpath\": \"S02/part-102.dat\"}, {\"md5\": \"82aa4b0af34c2313a562076992e50aa3\", \"relpath\": \"S02/part-162.dat\"}, {\"md5\": \"eccbc87e4b5ce2fe28308fd9f2a7baf3\", \"relpath\": \"S03/part-003.dat\"}, {\"md5\": \"03afdbd66e7929b125f8597834fa83a4\", \"relpath\": \"S03/part-063.dat\"}, {\"md5\": \"202cb962ac59075b964b07152d234b70\", \"relpath\": \"S03/part-123.dat\"}, {\"md5\": \"cedebb6e872f539bef8c3f919874e9d7\", \"relpath\": \"S03/part-183.dat\"}, {\"md5\": \"1ff1de774005f8da13f42943881c655f\", \"relpath\": \"S04/part-024.dat\"}, {\"md5\": \"68d30a9594728bc39aa24be94b319d21\", \"relpath\": \"S04/part-084.dat\"}, {\"md5\": \"0a09c8844ba8f0936c20bd791130d6b6\", \"relpath\": \"S04/part-144.dat\"}, {\"md5\": \"6c8349cc7260ae62e3b1396831a8398f\", \"relpath\": \"S05/part-045.dat\"}, {\"md5\": \"65b9eea6e1cc6bb9f0cd2a47751a186f\", \"relpath\": \"S05/part-105.dat\"}, {\"md5\": \"9766527f2b5d3e95d4a733fcfb77bd7e\", \"relpath\": \"S05/part-165.dat\"}, {\"md5\": \"1679091c5a880faf6fb5e6087eb1b2dc\", \"relpath\": \"S06/part-006.dat\"}, {\"md5\": \"3295c76acbf4caaed33c36b1b5fc2cb1\", \"relpath\": \"S06/part-066.dat\"}, {\"md5\": \"069059b7ef840f0c74a814ec9237b6ec\", \"relpath\": \"S06/part-126.dat\"}, {\"md5\": \"9872ed9fc22fc182d371c3e9ed316094\", \"relpath\": \"S06/part-186.dat\"}, {\"md5\": \"02e74f10e0327ad868d138f2b4fdd6f0\", \"relpath\": \"S07/part-027.dat\"}, {\"md5\": \"c7e1249ffc03eb9ded908c236bd1996d\", \"relpath\": \"S07/part-087.dat\"}, {\"md5\": \"8d5e957f297893487bd98fa830fa6413\", \"relpath\": \"S07/part-147.dat\"}, {\"md5\": \"642e92efb79421734881b53e1e1b18b6\", \"relpath\": \"S08/part-048.dat\"}, {\"md5\": \"a3c65c2974270fd093ee8a9bf8ae7d0b\", \"relpath\": \"S08/part-108.dat\"}, {\"md5\": \"006f52e9102a8d3be2fe5614f42ba989\", \"relpath\": \"S08/part-168.dat\"}, {\"md5\": \"45c48cce2e2d7fbdea1afc51c7c6ad26\", \"relpath\": \"S09/part-009.dat\"}, {\"md5\": \"14bfa6bb14875e45bba028a21ed38046\", \"relpath\": \"S09/part-069.dat\"}, {\"md5\": \"d1f491a404d6854880943e5c3cd9ca25\", \"relpath\": \"S09/part-129.dat\"}, {\"md5\": \"a2557a7b2e94197ff767970b67041697\", \"relpath\": \"S09/part-189.dat\"}, {\"md5\": \"34173cb38f07f89ddbebc2ac9128303f\", \"relpath\": \"S10/part-030.dat\"}, {\"md5\": \"8613985ec49eb8f757ae6439e879bb2a\", \"relpath\": \"S10/part-090.dat\"}, {\"md5\": \"7ef605fc8dba5425d6965fbd4c8fbe1f\", \"relpath\": \"S10/part-150.dat\"}, {\"md5\": \"2838023a778dfaecdc212708f721b788\", \"relpath\": \"S11/part-051.dat\"}, {\"md5\": \"698d51a19d8a121ce581499d7b701668\", \"relpath\": \"S11/part-111.dat\"}, {\"md5\": \"a4a042cf4fd6bfb47701cbc8a1653ada\", \"relpath\": \"S11/part-171.dat\"}, {\"md5\": \"c20ad4d76fe97759aa27a0c99bff6710\", \"relpath\": \"S12/part-012.dat\"}, {\"md5\": \"32bb90e8976aab5298d5da10fe66f21d\", \"relpath\": \"S12/part-072.dat\"}, {\"md5\": \"65ded5353c5ee48d0b7d48c591b8f430\", \"relpath\": \"S12/part-132.dat\"}, {\"md5\": \"58a2fc6ed39fd083f55d4182bf88826d\", \"relpath\": \"S12/part-192.dat\"}, {\"md5\": \"182be0c5cdcd5072bb1864cdee4d3d6e\", \"relpath\": \"S13/part-033.dat\"}, {\"md5\": \"98dce83da57b0395e163467c9dae521b\", \"relpath\": \"S13/part-093.dat\"}, {\"md5\": \"b3e3e393c77e35a4a3f3cbd1e429b5dc\", \"relpath\": \"S13/part-153.dat\"}, {\"md5\": \"a684eceee76fc522773286a895bc8436\", \"relpath\": \"S14/part-054.dat\"}, {\"md5\": \"5fd0b37cd7dbbb00f97ba6ce92bf5add\", \"relpath\": \"S14/part-114.dat\"}, {\"md5\": \"bf8229696f7a3bb4700cfddef19fa23f\", \"relpath\": \"S14/part-174.dat\"}, {\"md5\": \"9bf31c7ff062936a96d3c8bd1f8f2ff3\", \"relpath\": \"S15/part-015.dat\"}, {\"md5\": \"d09bf41544a3365a46c9077ebb5e35c3\", \"relpath\": \"S15/part-075.dat\"}, {\"md5\": \"7f1de29e6da19d22b51c68001e7e0e54\", \"relpath\": \"S15/part-135.dat\"}, {\"md5\": \"0336dcbab05b9d5ad24f4333c7658a0e\", \"relpath\": \"S15/part-195.dat\"}, {\"md5\": \"19ca14e7ea6328a42e0eb13d585e4c22\", \"relpath\": \"S16/part-036.dat\"}, {\"md5\": \"26657d5ff9020d2abefe558796b99584\", \"relpath\": \"S16/part-096.dat\"}, {\"md5\": \"1c9ac0159c94d8d0cbedc973445af2da\", \"relpath\": \"S16/part-156.dat\"}, {\"md5\": \"72b32a1f754ba1c09b3695e0cb6cde7f\", \"relpath\": \"S17/part-057.dat\"}, {\"md5\": \"eb160de1de89d9058fcb0b968dbbbd68\", \"relpath\": \"S17/part-117.dat\"}, {\"md5\": \"96da2f590cd7246bbde0051047b0d6f7\", \"relpath\": \"S17/part-177.dat\"}, {\"md5\": \"6f4922f45568161a8cdf4ad2299f6d23\", \"relpath\": \"S18/part-018.dat\"}, {\"md5\": \"35f4a8d465e6e1edc05f3d8ab658c551\", \"relpath\": \"S18/part-078.dat\"}, {\"md5\": \"013d407166ec4fa56eb1e1f8cbe183b9\", \"relpath\": \"S18/part-138.dat\"}, {\"md5\": \"0e65972dce68dad4d52d063967f0a705\", \"relpath\": \"S18/part-198.dat\"}, {\"md5\": \"d67d8ab4f4c10bf22aa353e27879133c\", \"relpath\": \"S19/part-039.dat\"}, {\"md5\": \"ac627ab1ccbdb62ec96e702f07f6425b\", \"relpath\": \"S19/part-099.dat\"}, {\"md5\": \"140f6969d5213fd0ece03148e62e461e\", \"relpath\": \"S19/part-159.dat\"}, {\"md5\": \"98f13708210194c475687be6106a3b84\", \"relpath\": \"s00/part-020.dat\"}, {\"md5\": \"d645920e395fedad7bbbed0eca3fe2e0\", \"relpath\": \"s00/part-040.dat\"}, {\"md5\": \"f033ab37c30201f73f142449d037028d\", \"relpath\": \"s00/part-080.dat\"}, {\"md5\": \"f899139df5e1059396431415e770c6dd\", \"relpath\": \"s00/part-100.dat\"}, {\"md5\": \"1385974ed5904a438616ff7bdb3f7439\", \"relpath\": \"s00/part-140.dat\"}, {\"md5\": \"b73ce398c39f506af761d2277d853a92\", \"relpath\": \"s00/part-160.dat\"}, {\"md5\": \"c4ca4238a0b923820dcc509a6f75849b\", \"relpath\": \"s01/part-001.dat\"}, {\"md5\": \"3416a75f4cea9109507cacd8e2f2aefc\", \"relpath\": \"s01/part-041.dat\"}, {\"md5\": \"7f39f8317fbdb1988ef4c628eba02591\", \"relpath\": \"s01/part-061.dat\"}, {\"md5\": \"38b3eff8baf56627478ec76a704e9b52\", \"relpath\": \"s01/part-101.dat\"}, {\"md5\": \"4c56ff4ce4aaf9573aa5dff913df997a\", \"relpath\": \"s01/part-121.dat\"}, {\"md5\": \"bd4c9ab730f5513206b999ec0d90d1fb\", \"relpath\": \"s01/part-161.dat\"}, {\"md5\": \"fc221309746013ac554571fbd180e1c8\", \"relpath\": \"s01/part-181.dat\"}, {\"md5\": \"c81e728d9d4c2f636f067f89cc14862c\", \"relpath\": \"s02/part-002.dat\"}, {\"md5\": \"b6d767d2f8ed5d21a44b0e5886680cb9\", \"relpath\": \"s02/part-022.dat\"}, {\"md5\": \"44f683a84163b3523afe57c2e008bc8c\", \"relpath\": \"s02/part-062.dat\"}, {\"md5\": \"9778d5d219c5080b9a6a17bef029331c\", \"relpath\": \"s02/part-082.dat\"}, {\"md5\": \"a0a080f42e6f13b3a2df133f073095dd\", \"relpath\": \"s02/part-122.dat\"}, {\"md5\": \"a8baa56554f96369ab93e4f3bb068c22\", \"relpath\": \"s02/part-142.dat\"}, {\"md5\": \"4c5bde74a8f110656874902f07378009\", \"relpath\": \"s02/part-182.dat\"}, {\"md5\": \"37693cfc748049e45d87b8c7d8b9aacd\", \"relpath\": \"s03/part-023.dat\"}, {\"md5\": \"17e62166fc8586dfa4d1bc0e1742c08b\", \"relpath\": \"s03/part-043.dat\"}, {\"md5\": \"fe9fc289c3ff0af142b6d3bead98a923\", \"relpath\": \"s03/part-083.dat\"}, {\"md5\": \"6974ce5ac660610b44d9b9fed0ff9548\", \"relpath\": \"s03/part-103.dat\"}, {\"md5\": \"903ce9225fca3e988c2af215d4e544d3\", \"relpath\": \"s03/part-143.dat\"}, {\"md5\": \"0777d5c17d4066b82ab86dff8a46af6f\", \"relpath\": \"s03/part-163.dat\"}, {\"md5\": \"a87ff679a2f3e71d9181a67b7542122c\", \"relpath\": \"s04/part-004.dat\"}, {\"md5\": \"f7177163c833dff4b38fc8d2872f1ec6\", \"relpath\": \"s04/part-044.dat\"}, {\"md5\": \"ea5d2f1c4608232e07d3aa3d998e5135\", \"relpath\": \"s04/part-064.dat\"}, {\"md5\": \"c9e1074f5b3f9fc8ea15d152add07294\", \"relpath\": \"s04/part-104.dat\"}, {\"md5\": \"c8ffe9a587b126f152ed3d89a146b445\", \"relpath\": \"s04/part-124.dat\"}, {\"md5\": \"fa7cdfad1a5aaf8370ebeda47a1ff1c3\", \"relpath\": \"s04/part-164.dat\"}, {\"md5\": \"6cdd60ea0045eb7a6ec44c54d29ed402\", \"relpath\": \"s04/part-184.dat\"}, {\"md5\": \"e4da3b7fbbce2345d7772b0674a318d5\", \"relpath\": \"s05/part-005.dat\"}, {\"md5\": \"8e296a067a37563370ded05f5a3bf3ec\", \"relpath\": \"s05/part-025.dat\"}, {\"md5\": \"fc490ca45c00b1249bbe3554a4fdf6fb\", \"relpath\": \"s05/part-065.dat\"}, {\"md5\": \"3ef815416f775098fe977004015c6193\", \"relpath\": \"s05/part-085.dat\"}, {\"md5\": \"3def184ad8f4755ff269862ea77393dd\", \"relpath\": \"s05/part-125.dat\"}, {\"md5\": \"2b24d495052a8ce66358eb576b8912c8\", \"relpath\": \"s05/part-145.dat\"}, {\"md5\": \"eecca5b6365d9607ee5a9d336962c534\", \"relpath\": \"s05/part-185.dat\"}, {\"md5\": \"4e732ced3463d06de0ca9a15b6153677\", \"relpath\": \"s06/part-026.dat\"}, {\"md5\": \"d9d4f495e875a2e075a1a4a6e1b9770f\", \"relpath\": \"s06/part-046.dat\"}, {\"md5\": \"93db85ed909c13838ff95ccfa94cebd9\", \"relpath\": \"s06/part-086.dat\"}, {\"md5\": \"f0935e4cd5920aa6c7c996a5ee53a70f\", \"relpath\": \"s06/part-106.dat\"}, {\"md5\": \"a5e00132373a7031000fd987a3c9f87b\", \"relpath\": \"s06/part-146.dat\"}, {\"md5\": \"7e7757b1e12abcb736ab9a754ffb617a\", \"relpath\": \"s06/part-166.dat\"}, {\"md5\": \"8f14e45fceea167a5a36dedd4bea2543\", \"relpath\": \"s07/part-007.dat\"}, {\"md5\": \"67c6a1e7ce56d3d6fa748ab6d9af3fd7\", \"relpath\": \"s07/part-047.dat\"}, {\"md5\": \"735b90b4568125ed6c3f678819b6e058\", \"relpath\": \"s07/part-067.dat\"}, {\"md5\": \"a97da629b098b75c294dffdc3e463904\", \"relpath\": \"s07/part-107.dat\"}, {\"md5\": \"ec5decca5ed3d6b8079e2e7e7bacc9f2\", \"relpath\": \"s07/part-127.dat\"}, {\"md5\": \"5878a7ab84fb43402106c575658472fa\", \"relpath\": \"s07/part-167.dat\"}, {\"md5\": \"31fefc0e570cb3860f2a6d4b38c6490d\", \"relpath\": \"s07/part-187.dat\"}, {\"md5\": \"c9f0f895fb98ab9159f51fd0297e236d\", \"relpath\": \"s08/part-008.dat\"}, {\"md5\": \"33e75ff09dd601bbe69f351039152189\", \"relpath\": \"s08/part-028.dat\"}, {\"md5\": \"a3f390d88e4c41f2747bfa2f1b5f87db\", \"relpath\": \"s08/part-068.dat\"}, {\"md5\": \"2a38a4a9316c49e5a833517c45d31070\", \"relpath\": \"s08/part-088.dat\"}, {\"md5\": \"76dc611d6ebaafc66cc0879c71b5db5c\", \"relpath\": \"s08/part-128.dat\"}, {\"md5\": \"47d1e990583c9c67424d369f3414728e\", \"relpath\": \"s08/part-148.dat\"}, {\"md5\": \"9dcb88e0137649590b755372b040afad\", \"relpath\": \"s08/part-188.dat\"}, {\"md5\": \"6ea9ab1baa0efb9e19094440c317e21b\", \"relpath\": \"s09/part-029.dat\"}, {\"md5\": \"f457c545a9ded88f18ecee47145a72c0\", \"relpath\": \"s09/part-049.dat\"}, {\"md5\": \"7647966b7343c29048673252e490f736\", \"relpath\": \"s09/part-089.dat\"}, {\"md5\": \"2723d092b63885e0d7c260cc007e8b9d\", \"relpath\": \"s09/part-109.dat\"}, {\"md5\": \"f2217062e9a397a1dca429e7d70bc6ca\", \"relpath\": \"s09/part-149.dat\"}, {\"md5\": \"3636638817772e42b59d74cff571fbb3\", \"relpath\": \"s09/part-169.dat\"}, {\"md5\": \"d3d9446802a44259755d38e6d163e820\", \"relpath\": \"s10/part-010.dat\"}, {\"md5\": \"c0c7c76d30bd3dcaefc96f40275bdc0a\", \"relpath\": \"s10/part-050.dat\"}, {\"md5\": \"7cbbc409ec990f19c78c75bd1e06f215\", \"relpath\": \"s10/part-070.dat\"}, {\"md5\": \"5f93f983524def3dca464469d2cf9f3e\", \"relpath\": \"s10/part-110.dat\"}, {\"md5\": \"9b8619251a19057cff70779273e95aa6\", \"relpath\": \"s10/part-130.dat\"}, {\"md5\": \"149e9677a5989fd342ae44213df68868\", \"relpath\": \"s10/part-170.dat\"}, {\"md5\": \"cfecdb276f634854f3ef915e2e980c31\", \"relpath\": \"s10/part-190.dat\"}, {\"md5\": \"6512bd43d9caa6e02c990b0a82652dca\", \"relpath\": \"s11/part-011.dat\"}, {\"md5\": \"c16a5320fa475530d9583c34fd356ef5\", \"relpath\": \"s11/part-031.dat\"}, {\"md5\": \"e2c420d928d4bf8ce0ff2ec19b371514\", \"relpath\": \"s11/part-071.dat\"}, {\"md5\": \"54229abfcfa5649e7003b83dd4755294\", \"relpath\": \"s11/part-091.dat\"}, {\"md5\": \"1afa34a7f984eeabdbb0a7d494132ee5\", \"relpath\": \"s11/part-131.dat\"}, {\"md5\": \"a8f15eda80c50adb0e71943adc8015cf\", \"relpath\": \"s11/part-151.dat\"}, {\"md5\": \"0aa1883c6411f7873cb83dacb17b0afc\", \"relpath\": \"s11/part-191.dat\"}, {\"md5\": \"6364d3f0f495b6ab9dcf8d3b5c6e0b01\", \"relpath\": \"s12/part-032.dat\"}, {\"md5\": \"9a1158154dfa42caddbd0694a4e9bdc8\", \"relpath\": \"s12/part-052.dat\"}, {\"md5\": \"92cc227532d17e56e07902b254dfad10\", \"relpath\": \"s12/part-092.dat\"}, {\"md5\": \"7f6ffaa6bb0b408017b62254211691b5\", \"relpath\": \"s12/part-112.dat\"}, {\"md5\": \"37a749d808e46495a8da1e5352d03cae\", \"relpath\": \"s12/part-152.dat\"}, {\"md5\": \"1ff8a7b5dc7a7d1f0ed65aaa29c04b1e\", \"relpath\": \"s12/part-172.dat\"}, {\"md5\": \"c51ce410c124a10e0db5e4b97fc2af39\", \"relpath\": \"s13/part-013.dat\"}, {\"md5\": \"d82c8d1619ad8176d665453cfb2e55f0\", \"relpath\": \"s13/part-053.dat\"}, {\"md5\": \"d2ddea18f00665ce8623e36bd4e3c7c5\", \"relpath\": \"s13/part-073.dat\"}, {\"md5\": \"73278a4a86960eeb576a8fd4c9ec6997\", \"relpath\": \"s13/part-113.dat\"}, {\"md5\": \"9fc3d7152ba9336a670e36d0ed79bc43\", \"relpath\": \"s13/part-133.dat\"}, {\"md5\": \"f7e6c85504ce6e82442c770f7c8606f0\", \"relpath\": \"s13/part-173.dat\"}, {\"md5\": \"bd686fd640be98efaae0091fa301e613\", \"relpath\": \"s13/part-193.dat\"}, {\"md5\": \"aab3238922bcc25a6f606eb525ffdc56\", \"relpath\": \"s14/part-014.dat\"}, {\"md5\": \"e369853df766fa44e1ed0ff613f563bd\", \"relpath\": \"s14/part-034.dat\"}, {\"md5\": \"ad61ab143223efbc24c7d2583be69251\", \"relpath\": \"s14/part-074.dat\"}, {\"md5\": \"f4b9ec30ad9f68f89b29639786cb62ef\", \"relpath\": \"s14/part-094.dat\"}, {\"md5\": \"02522a2b2726fb0a03bb19f2d8d9524d\", \"relpath\": \"s14/part-134.dat\"}, {\"md5\": \"1d7f7abc18fcb43975065399b0d1e48e\", \"relpath\": \"s14/part-154.dat\"}, {\"md5\": \"a597e50502f5ff68e3e25b9114205d4a\", \"relpath\": \"s14/part-194.dat\"}, {\"md5\": \"1c383cd30b7c298ab50293adfecb7b18\", \"relpath\": \"s15/part-035.dat\"}, {\"md5\": \"b53b3a3d6ab90ce0268229151c9bde11\", \"relpath\": \"s15/part-055.dat\"}, {\"md5\": \"812b4ba287f5ee0bc9d43bbf5bbe87fb\", \"relpath\": \"s15/part-095.dat\"}, {\"md5\": \"2b44928ae11fb9384c4cf38708677c48\", \"relpath\": \"s15/part-115.dat\"}, {\"md5\": \"2a79ea27c279e471f4d180b08d62b00a\", \"relpath\": \"s15/part-155.dat\"}, {\"md5\": \"82161242827b703e6acf9c726942a1e4\", \"relpath\": \"s15/part-175.dat\"}, {\"md5\": \"c74d97b01eae257e44aa9d5bade97baf\", \"relpath\": \"s16/part-016.dat\"}, {\"md5\": \"9f61408e3afb633e50cdf1b20de6f466\", \"relpath\": \"s16/part-056.dat\"}, {\"md5\": \"fbd7939d674997cdb4692d34de8633c4\", \"relpath\": \"s16/part-076.dat\"}, {\"md5\": \"c45147dee729311ef5b5c3003946c48f\", \"relpath\": \"s16/part-116.dat\"}, {\"md5\": \"42a0e188f5033bc65bf8d78622277c4e\", \"relpath\": \"s16/part-136.dat\"}, {\"md5\": \"38af86134b65d0f10fe33d30dd76442e\", \"relpath\": \"s16/part-176.dat\"}, {\"md5\": \"084b6fbb10729ed4da8c3d3f5a3ae7c9\", \"relpath\": \"s16/part-196.dat\"}, {\"md5\": \"70efdf2ec9b086079795c442636b55fb\", \"relpath\": \"s17/part-017.dat\"}, {\"md5\": \"a5bfc9e07964f8dddeb95fc584cd965d\", \"relpath\": \"s17/part-037.dat\"}, {\"md5\": \"28dd2c7955ce926456240b2ff0100bde\", \"relpath\": \"s17/part-077.dat\"}, {\"md5\": \"e2ef524fbf3d9fe611d5a8e90fefdc9c\", \"relpath\": \"s17/part-097.dat\"}, {\"md5\": \"3988c7f88ebcb58c6ce932b957b6f332\", \"relpath\": \"s17/part-137.dat\"}, {\"md5\": \"6c4b761a28b734fe93831e3fb400ce87\", \"relpath\": \"s17/part-157.dat\"}, {\"md5\": \"85d8ce590ad8981ca2c8286f79f59954\", \"relpath\": \"s17/part-197.dat\"}, {\"md5\": \"a5771bce93e200c36f7cd9dfd0e5deaa\", \"relpath\": \"s18/part-038.dat\"}, {\"md5\": \"66f041e16a60928b05a7e228a89c3799\", \"relpath\": \"s18/part-058.dat\"}, {\"md5\": \"ed3d2c21991e3bef5e069713af9fa6ca\", \"relpath\": \"s18/part-098.dat\"}, {\"md5\": \"5ef059938ba799aaa845e1c2e8a762bd\", \"relpath\": \"s18/part-118.dat\"}, {\"md5\": \"06409663226af2f3114485aa4e0a23b4\", \"relpath\": \"s18/part-158.dat\"}, {\"md5\": \"8f85517967795eeef66c225f7883bdcb\", \"relpath\": \"s18/part-178.dat\"}, {\"md5\": \"1f0e3dad99908345f7439f8ffabdffc4\", \"relpath\": \"s19/part-019.dat\"}, {\"md5\": \"093f65e080a295f8076b1c5722a46aa2\", \"relpath\": \"s19/part-059.dat\"}, {\"md5\": \"d1fe173d08e959397adf34b1d77e88d7\", \"relpath\": \"s19/part-079.dat\"}, {\"md5\": \"07e1cd7dca89a1678042477183b7ac3f\", \"relpath\": \"s19/part-119.dat\"}, {\"md5\": \"e00da03b685a0dd18fb6a08af0923de0\", \"relpath\": \"s19/part-139.dat\"}, {\"md5\": \"8f53295a73878494e9bc8dd6c3c7104f\", \"relpath\": \"s19/part-179.dat\"}, {\"md5\": \"84d9ee44e457ddef7f2c4f25dc8fa865\", \"relpath\": \"s19/part-199.dat\"}]",
+      "dvc_dir_hash": "a7fac4a8bcb1dd8a945f770b13a9e174"
+    }
+  ],
+  "path_safety": {
+    "$comment": "Paths that must be accepted and rejected on READ as well as write (spec \u00a73.2). Rejection is a security boundary: a consumer materialises relpath to disk, and observed-download manifests describe other people's deposits.",
+    "accept": [
+      {
+        "path": "a.txt",
+        "why": "the ordinary case"
+      },
+      {
+        "path": "sub/dir/a.txt",
+        "why": "nested"
+      },
+      {
+        "path": ".hidden",
+        "why": "a leading dot is a normal filename, not a traversal"
+      },
+      {
+        "path": "..hidden",
+        "why": "TWO leading dots followed by more characters is a filename, not '..'"
+      },
+      {
+        "path": "a..b/c",
+        "why": "dots in the middle of a component"
+      },
+      {
+        "path": "a-b/x",
+        "why": "hyphen sorts before slash but is perfectly legal"
+      },
+      {
+        "path": "caf\u00e9.txt",
+        "why": "non-ASCII (precomposed U+00E9)"
+      },
+      {
+        "path": "cafe\u0301.txt",
+        "why": "non-ASCII (decomposed; accepted, then normalised to NFC)"
+      },
+      {
+        "path": "\ud83e\uddec.txt",
+        "why": "astral-plane codepoint"
+      },
+      {
+        "path": "run 1/a#b%c?d.txt",
+        "why": "URL-unsafe but filesystem-legal characters"
+      },
+      {
+        "path": "sample:1/a.txt",
+        "why": "a colon is legal on POSIX away from position 1; only a leading DRIVE prefix like 'C:' is rejected"
+      },
+      {
+        "path": "x.tar.gz",
+        "why": "compound extension"
+      }
+    ],
+    "reject": [
+      {
+        "path": "",
+        "why": "empty"
+      },
+      {
+        "path": "/abs/path",
+        "why": "absolute POSIX path - would escape the import target"
+      },
+      {
+        "path": "a//b",
+        "why": "empty interior component; ambiguous on materialisation"
+      },
+      {
+        "path": "a/",
+        "why": "trailing separator; this names a directory, not a file"
+      },
+      {
+        "path": "..",
+        "why": "the parent directory"
+      },
+      {
+        "path": ".",
+        "why": "the current directory"
+      },
+      {
+        "path": "a/../b",
+        "why": "interior traversal - the classic Zip-Slip shape"
+      },
+      {
+        "path": "../a",
+        "why": "leading traversal"
+      },
+      {
+        "path": "a/..",
+        "why": "trailing traversal"
+      },
+      {
+        "path": "./a",
+        "why": "a '.' component"
+      },
+      {
+        "path": "a/./b",
+        "why": "an interior '.' component"
+      },
+      {
+        "path": "C:/data",
+        "why": "Windows drive-absolute"
+      },
+      {
+        "path": "c:x",
+        "why": "Windows drive-relative"
+      },
+      {
+        "path": "a\\b",
+        "why": "backslash: a separator on one platform and a filename character on another"
+      },
+      {
+        "path": "a\u0000b",
+        "why": "NUL byte"
+      },
+      {
+        "path": "a\nb",
+        "why": "newline; a control character, and it breaks every line-oriented tool"
+      },
+      {
+        "path": "a\tb",
+        "why": "tab; control character"
+      },
+      {
+        "path": "a\u007fb",
+        "why": "DEL; control character"
+      },
+      {
+        "path": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "why": "longer than the 4096-byte path limit"
+      },
+      {
+        "path": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "why": "component longer than the 255-byte limit"
+      }
+    ]
+  },
+  "manifests": {
+    "$comment": "Whole-document cases. 'valid' must load; each entry in 'invalid' must be refused with the named error class.",
+    "valid": [
+      {
+        "name": "observed-download-terse",
+        "why": "Spec \u00a78.2: layout preserved, so no source_path and the body is DVC-.dir-shaped.",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "minor-1-staleness-fields",
+        "why": "(1.1) The optional staleness fields (spec \u00a78): concept and record_version in the header, file_version per entry. Must load, and schema_version is 1.1 because 1.1 fields are present.",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.1",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "concept": "geo:GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-09-04T00:00:00Z",
+          "retrieved": "2026-09-04T00:00:00Z",
+          "record_version": "2026-07-30",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "c9f702968e40cd5ea910840dfa97b185",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "file_version": "2026-07-30T09:02:00Z"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "wrong-schema-token",
+        "why": "The internal schema field is the fallback identifier; a reader must key on it.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "tessera",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "future-major-version",
+        "why": "A differing MAJOR version means the reader cannot be trusted to interpret it.",
+        "error": "UnsupportedVersion",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "2.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "etag-algorithm",
+        "why": "hash_algorithm 'etag' is reserved but rejected in v1 (docs/decisions.md D-04).",
+        "error": "UnsupportedAlgorithm",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "etag",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "body-hash-mismatch",
+        "why": "The load-bearing check: a files array that does not match its body_hash.",
+        "error": "BodyHashMismatch",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "00000000000000000000000000000000",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "nfiles-disagrees",
+        "why": "Cheap sanity check from spec \u00a79 step 4.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 2,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "size-disagrees",
+        "why": "Cheap sanity check from spec \u00a79 step 4.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 99,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "traversal-relpath",
+        "why": "Path-traversal safety on READ, because observed-download manifests are untrusted third-party descriptions.",
+        "error": "PathSafetyError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "5be8f22af60d59f095ecacca8372523b",
+          "files": [
+            {
+              "relpath": "../../etc/passwd",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "duplicate-relpath",
+        "why": "relpath is an entry's identity; duplicates leave no canonical ordering.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 12,
+          "nfiles": 2,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "a.txt",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            },
+            {
+              "relpath": "a.txt",
+              "md5": "591785b794601e212b260e25925636fd",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "naive-timestamp",
+        "why": "A provenance timestamp without an offset is not an instant (docs/decisions.md D-05).",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "unknown-entry-field",
+        "why": "Unknown fields are covered by body_hash, so tolerating them in one implementation and dropping them in another makes one manifest hash two ways (docs/decisions.md D-07).",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "a.txt",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "mtime": 1234567890
+            }
+          ]
+        }
+      },
+      {
+        "name": "null-instead-of-absent",
+        "why": "The format omits absent fields rather than writing null; accepting both spellings would give one manifest two canonical forms.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ],
+          "record_accession": null
+        }
+      },
+      {
+        "name": "float-size",
+        "why": "1.0 and 1 are the same number but different bytes.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "a.txt",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "digest-wrong-length",
+        "why": "A 32-character digest under sha256 means the manifest was assembled from md5s under the wrong header \u2014 a mass verification failure waiting to happen.",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "sha256",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "GSE111111_processed.h5ad",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
