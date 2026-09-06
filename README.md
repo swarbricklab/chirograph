@@ -25,11 +25,16 @@ repository the data must live in:
 
 ## Install
 
+Until the package is published to PyPI, install from a tagged release:
+
 ```bash
-pip install chirograph                 # no runtime dependencies at all
-pip install 'chirograph[dvc]'          # + reading .dvc / dvc.lock files
-pip install 'chirograph[schema]'       # + JSON Schema validation
+pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"
+pip install "chirograph[dvc] @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"     # + reading .dvc / dvc.lock
+pip install "chirograph[schema] @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"  # + JSON Schema validation
 ```
+
+Once on PyPI this becomes the usual `pip install chirograph` (with `[dvc]` / `[schema]`
+extras).
 
 The core has **zero required dependencies**: it is the reference implementation of a
 file format, and a consumer of a checksum-verification library has the best possible
