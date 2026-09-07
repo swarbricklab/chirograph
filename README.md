@@ -28,9 +28,9 @@ repository the data must live in:
 Until the package is published to PyPI, install from a tagged release:
 
 ```bash
-pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"
-pip install "chirograph[dvc] @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"     # + reading .dvc / dvc.lock
-pip install "chirograph[schema] @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"  # + JSON Schema validation
+pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.2.0"
+pip install "chirograph[dvc] @ git+https://github.com/Swarbricklab/chirograph@v0.2.0"     # + reading .dvc / dvc.lock
+pip install "chirograph[schema] @ git+https://github.com/Swarbricklab/chirograph@v0.2.0"  # + JSON Schema validation
 ```
 
 Once on PyPI this becomes the usual `pip install chirograph` (with `[dvc]` / `[schema]`
