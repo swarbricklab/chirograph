@@ -24,6 +24,12 @@ the members' `(path, size, crc32)`.
 To record this, a manifest must carry, per ZIP member, its **`crc32`**, and, once per
 container, the container's **md5** and where it sits at the source. This note defines how.
 
+The structural model generalises to **any container format** (`tar`, `tar.gz`, … — GEO
+leans on compressed tar), giving member-granular provenance regardless; the *cheap*
+confirm is what varies by format, and a `format` field selects the strategy (§6). So the
+model is member-granular-containers first, with download-free confirm where the format
+allows.
+
 ## 2. The model
 
 A `2.0` manifest gains a top-level **`containers`** array. Members link to a container
@@ -71,10 +77,34 @@ archive object itself, nothing derived from its members:
 | field | required | type | meaning |
 |---|---|---|---|
 | `source_root` | **yes** | string | The container's path relative to `source_url`. The exact prefix members match against, and how the container is fetched (`source_url` + `source_root`). The container's primary key (sort key; unique within a manifest). POSIX-separated, NFC, relative, no `..` — the same path rules as `relpath`/`source_path` (§3.4). |
+| `format` | **yes** | string | The container's archive format, from the blessed enum (§3.1). Selects the confirm strategy (§6). |
 | `md5` | **yes** | string | The container's whole-file hash, per `hash_algorithm`, lowercase hex. What authenticates the container byte-for-byte (so its central directory can be trusted). |
 | `size` | optional | integer | The container's size in bytes. Lets a consumer compute the central-directory tail-read offset. |
 | `etag` | optional | string | The container's native HTTP/S3 validator, as observed. Non-authoritative, like the per-entry `etag` (§3.2). |
 | `version_id` | optional | string | The container's provider-native object version id. |
+
+### 3.1 `format` — a closed, canonical enum
+
+`format` is a **closed enum** with canonical, lowercase tokens — like `hash_algorithm`
+and `provenance_type`, and for the same reason: it is a canonicalised scalar in
+`body_hash` (§4), so the same container described by two tools **must** produce the same
+token or their `body_hash`es diverge. The spec fixes the exact spelling per format
+(`tar.gz`, never `tgz`), so there is no per-token normalisation rule to get wrong. The
+initial set:
+
+| token | confirm class (§6) |
+|---|---|
+| `zip` | A — indexed, per-member CRC |
+| `tar` | B — sequential, seekable |
+| `tar.gz`, `tar.bz2`, `tar.xz`, `tar.zst` | C — whole-stream compressed |
+
+New formats are added by a minor spec revision (`7z` is the natural next — it is class A,
+with a per-member CRC — but is not blessed until a real deposit needs it). Crucially, a
+reader that meets a `format` token it does **not** recognise (from a newer writer) **MUST
+NOT** reject the manifest: it treats the container as **opaque** — class C — authenticating
+it by `md5` and confirming members by download. That keeps the enum closed (canonical
+spellings, interop) while staying forward-compatible: a future format is still usable by
+an older reader, just not cheaply confirmable.
 
 Deliberately **no member/element count.** A count of manifest members under a container
 is *circular* — it is derived from the same `files` list it would purport to validate,
@@ -146,25 +176,49 @@ declared `source_root` is a **loose** file (direct fetch), exactly as in `1.x`.
   layout, decoupled from `relpath` (the workspace layout), so container membership never
   couples to how the analyst arranged the workspace.
 
-## 6. Member field: `crc32`
+## 6. Confirm classes — the value is format-dependent
 
-A ZIP member entry may carry `crc32` — the hex CRC-32 of the member's *uncompressed*
-bytes, as read from the central directory. It is a per-member entry field, so it is
-covered by `body_hash` via `files` (part of the "which bytes" claim). It is **optional**:
-a member may be listed without being download-free-confirmable.
+The **structure** (containers block, `source_path` linkage, container `md5`) is
+format-agnostic and generalises to any archive: it records member-granular provenance
+("these members came from this container"), which alone is worth it (member-granular
+`dvc ls`/`diff` over a tarball instead of an opaque blob). The **cheap-confirm** value,
+though, is a property of the container format, not the model. `format` (§3.1) is the
+confirm-strategy selector, and there are three classes:
+
+| class | formats | confirm strategy | per-member content check |
+|---|---|---|---|
+| **A** — indexed, per-member CRC | `zip` | one tail read of the central directory | `crc32` — **no member bytes fetched** |
+| **B** — sequential, seekable | `tar` | walk the 512-byte headers by Range, then Range each member's bytes | member `md5` (targeted read) |
+| **C** — whole-stream compressed | `tar.gz`, `tar.bz2`, `tar.xz`, `tar.zst`, *and any unrecognised format* | download + decompress the whole stream | member `md5` (after full decompress) |
+
+Why the split: a ZIP's central directory is at the end with a per-member CRC-32 of the
+uncompressed data (class A); a TAR header carries only a checksum of the *header*, not
+the data, so you fall back to the member's own `md5` via a targeted read (class B); a
+compressed-tar is a single non-seekable stream, so there is no random access and confirm
+means fetching the whole thing (class C). Representing a class-C container is still worth
+it — member-granular provenance — even though its confirm isn't cheap; `format` just
+tells the truth about the cost.
+
+### `crc32` — the class-A coordinate
+
+A member entry may carry `crc32`: the hex CRC-32 of its *uncompressed* bytes, as read
+from a ZIP central directory. It exists so class A can confirm a member **without
+fetching its bytes**. It is a per-member entry field, covered by `body_hash` via `files`
+(part of the "which bytes" claim), and **optional** — present for `zip` members, absent
+for class B/C members (which use their `md5` on a targeted or full read).
 
 `crc32` is **weak on its own** — 32-bit, linear, adversarially forgeable — and **MUST
 NOT** be treated as a content-address or a verification digest. It is only ever a
-*locator / cheap cross-check*, and it is trustworthy only when anchored:
+*locator / cheap cross-check*, trustworthy only when anchored:
 
 - by the **container `md5`**, which authenticates the whole ZIP byte-for-byte, so the
-  central directory inside it (and therefore the `crc32`s it reports) is trusted; and/or
+  central directory it contains (and the `crc32`s it reports) is trusted; and/or
 - by the member's own **`md5`**, which the manifest always carries.
 
-So a manifest for a ZIP deposit carries **both** coordinates: `md5` for reproducibility
-(DVC hashing, `dvc list --show-hash`, verify-on-read) **and** `crc32` (+ the container)
-for download-free `confirm`. Different verbs use each; neither replaces the other. This
-is the same discipline as the non-authoritative `etag` (D-04).
+So a ZIP-member manifest carries **both** coordinates: `md5` for reproducibility (DVC
+hashing, `dvc list --show-hash`, verify-on-read) **and** `crc32` (+ the container) for
+download-free `confirm`. Different verbs use each; neither replaces the other — the same
+discipline as the non-authoritative `etag` (D-04).
 
 ## 7. Version derivation and reader support
 
@@ -184,6 +238,10 @@ On read (in addition to the existing rules), a `2.0` manifest **MUST** satisfy:
   container; a member carrying `crc32` **MUST** sit under some declared container.
 - Every declared container has **≥ 1** member under it (no orphan containers).
 - `containers[].md5` matches `hash_algorithm`'s digest length and is lowercase hex.
+- `containers[].format` is present. A value in the blessed enum (§3.1) is validated for
+  its class; an **unrecognised** value is accepted and treated as class C (opaque), not
+  rejected — this is the forward-compatibility rule and **MUST** hold so a newer format
+  does not make the manifest unreadable to an older reader.
 
 ## 9. What does not change
 
@@ -233,16 +291,19 @@ archivefs's:
 
 Same shape and discipline as the `1.1` work:
 
-- **Model** (`manifest.py`): a `Container` dataclass (`source_root`, `md5`, `size`,
-  `etag`, `version_id`); `Manifest.containers: list[Container]`; `FileEntry.crc32`;
-  `to_dict`/`from_dict` for both; version derivation extended to the `2.0` tier;
-  `body_hash` property takes the two-key path when containers are present.
+- **Model** (`manifest.py`): a `Container` dataclass (`source_root`, `format`, `md5`,
+  `size`, `etag`, `version_id`); `Manifest.containers: list[Container]`;
+  `FileEntry.crc32`; `to_dict`/`from_dict` for both; version derivation extended to the
+  `2.0` tier; `body_hash` property takes the two-key path when containers are present.
 - **Constants**: `SUPPORTED_MAJOR → 2`; `SCHEMA_VERSION_MAJOR_2 = "2.0"`; a
-  `CONTAINER_FIELD_ORDER`; `crc32` appended to `ENTRY_FIELD_ORDER`.
+  `CONTAINER_FIELD_ORDER`; `CONTAINER_FORMATS` (the blessed enum) with a class map;
+  `crc32` appended to `ENTRY_FIELD_ORDER`.
 - **Canonicalisation** (`canonical.py`): the single new two-key branch of §4; the
   container array reuses the existing per-element normalise/scalar/sort machinery.
-- **Schema** (`gen_schema.py` + regen): a `containers` array (with its descriptor and
-  `additionalProperties: false`), and `crc32` on the entry.
+- **Schema** (`gen_schema.py` + regen): a `containers` array (descriptor with
+  `additionalProperties: false`); `format` a `string` (the schema does **not** pin it to
+  the enum — the enum is validated in code so an unrecognised value degrades to opaque
+  rather than failing schema validation); and `crc32` on the entry.
 - **Vectors**: *added*, not edited — a container-bearing body case (pinning the two-key
   canonical string and that container fields enter `body_hash`), plus a valid `2.0`
   whole-manifest and the linkage/validation reject cases. `spec_version → 2.0`. Every
