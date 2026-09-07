@@ -1,6 +1,6 @@
 # `.chiro.json` Format Specification
 
-**Format schema version:** `1.1` · **Spec revision:** v0.5 · **Status:** frozen (`1.0` core; `1.1` adds the optional §8 staleness fields)
+**Format schema version:** `2.0` · **Spec revision:** v0.6 · **Status:** frozen (`1.0` core; `1.1` adds the optional §8 staleness fields; `2.0` adds the §9 container block)
 
 This document is **normative**. It defines what a `.chiro.json` manifest is, what
 each field means, and how the hashes are computed. It deliberately contains no
@@ -142,6 +142,7 @@ The following **MUST NOT** be present at `1.0`: free-text `title`, `description`
 | `version_id` | optional | string | Provider-native object version identifier. Reserved for DVC compatibility. |
 | `etag` | optional | string | The source's native HTTP or S3 validator, as observed. **Non-authoritative**: a consumer **MUST NOT** use this field to verify content, and it **MUST NOT** substitute for `md5`. |
 | `file_version` | optional *(1.1)* | string | The source's per-file change signal, as observed (a per-file mtime, say). **Advisory** — a changed value is evidence of change, an unchanged value is evidence of nothing (§8). It **is** covered by `body_hash` (it is an entry field), but **MUST NOT** be used to verify content. Present ⇒ `schema_version` ≥ `"1.1"`. |
+| `crc32` | optional *(2.0)* | string | Hex CRC-32 (8 lowercase hex digits) of the member's *uncompressed* bytes, from a ZIP central directory — the coordinate for download-free confirmation (§9). **Weak and non-authoritative**: a cheap cross-check, **MUST NOT** be a content-address or used to verify content. Covered by `body_hash`. Only meaningful for a member under a container (§9); present ⇒ the entry sits under a container and `schema_version` is `"2.0"`. |
 
 ### 3.3 Entry fields are flat
 
@@ -212,6 +213,16 @@ The following are normative properties of that procedure:
 This procedure is frozen and pinned by the conformance vectors of §7. An
 implementation that does not reproduce every vector is not a conforming
 implementation.
+
+**With a `containers` block (`2.0`, §9)**, `body_hash` covers *both* arrays: the
+canonical serialisation is over the two-key document
+`{"containers": <sorted>, "files": <sorted>}` instead of the bare `files` array —
+`json.dumps(sort_keys=True, …)` fixes the key order as `containers` then `files`,
+`containers` sort by `source_root`, and every per-element rule above is unchanged.
+A manifest with **no** `containers` uses the files-only form above, byte-for-byte as
+in `1.x`. Because an older reader cannot fold a block it does not know into
+`body_hash`, this is a **major**-version change — which is why a container manifest
+declares `"2.0"` and a `1.x` reader refuses it (§2 major-version rule).
 
 ### Layer 3 — whole-file hash
 
@@ -358,3 +369,45 @@ impossible, depending on which meaning won.
 
 These three fields are the whole of the `1.1` addition: all scalars, added under the
 §3.1 minor-version rule, with no change to a `1.0` manifest's bytes.
+
+## 9. Containers (`2.0`)
+
+*(Added in `2.0`.)* An optional top-level **`containers`** array lets a manifest
+describe files delivered *inside* an archive member (a `.zip`, `.tar`, `.tar.gz`, …),
+so that its members are described individually and — for ZIP — confirmable without
+downloading the payload. The design of record, with the confirm mechanics per format,
+is [`container-model.md`](container-model.md); this section is the normative summary.
+
+A manifest **MUST** declare `schema_version` `"2.0"` **iff** it carries a non-empty
+`containers` array; one carrying none **MUST** stay `1.x` and is byte-identical. Placing
+the container identities in `body_hash` (§4) is why this is a major version, not a minor.
+
+### Container descriptor
+
+Each element of `containers`:
+
+| Field | Required | Type | Definition |
+|---|---|---|---|
+| `source_root` | **yes** | string | The container's path relative to `source_url`; the prefix its members' `source_path` values sit under, and how the container is fetched. Path-safe (§3.4), NFC. Unique within a manifest and the sort key for §4. |
+| `format` | **yes** | string | The archive format (`"zip"`, `"tar"`, `"tar.gz"`, `"tar.bz2"`, `"tar.xz"`, `"tar.zst"`). Selects the confirm strategy. A reader **MUST** treat an **unrecognised** value as opaque (download to confirm), not reject it. |
+| `md5` | **yes** | string | The container's whole-file hash, per `hash_algorithm`, lowercase hex. Authenticates the container byte-for-byte. |
+| `size` | optional | integer | The container's size in bytes. |
+| `etag` | optional | string | The container's native HTTP/S3 validator, as observed. Non-authoritative. |
+| `version_id` | optional | string | The container's provider-native object version id. |
+
+Container fields are flat scalars (§3.3), and the whole array is covered by `body_hash`
+(§4).
+
+### Membership and validation
+
+- A file is **delivered by** container `C` iff its `source_path` equals
+  `C.source_root + "/" + p` for a non-empty in-zip path `p`. A file under no
+  `source_root` is loose (fetched directly), exactly as in `1.x`.
+- `source_root` values **MUST** be unique and **non-nesting**: no `source_root` may be a
+  prefix (at a `"/"` boundary) of another. So a member matches at most one container.
+- Every declared container **MUST** have at least one member.
+- A member carrying `crc32` **MUST** be delivered by some declared container.
+
+`nfiles`, `size` and `verify` are unaffected — they concern members (the container's own
+size lives in its descriptor); a container is a fetch-time intermediary, not a workspace
+file, so it never has a `relpath` and is never materialised.

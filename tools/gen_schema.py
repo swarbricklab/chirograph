@@ -99,6 +99,62 @@ ENTRY = {
                 "value is evidence of nothing. Covered by body_hash. See spec section 8."
             ),
         },
+        "crc32": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$",
+            "description": (
+                "(2.0) Hex CRC-32 of the member's uncompressed bytes, from a ZIP central "
+                "directory - the coordinate for download-free confirmation. Weak and "
+                "NON-AUTHORITATIVE: a cheap cross-check, never a content-address; only "
+                "meaningful for a member under a zip container. See docs/container-model.md."
+            ),
+        },
+    },
+}
+
+#: A container descriptor (2.0). `format` is a plain string, NOT pinned to the
+#: enum: an unrecognised format degrades to opaque in code rather than failing
+#: schema validation (docs/container-model.md).
+CONTAINER = {
+    "type": "object",
+    "required": ["source_root", "format", "md5"],
+    "additionalProperties": False,
+    "properties": {
+        "source_root": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "The container's path relative to source_url; the prefix its members' "
+                "source_path values sit under, and how the container is fetched."
+            ),
+        },
+        "format": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "Archive format, e.g. zip, tar, tar.gz. Selects the confirm strategy; "
+                "an unrecognised value is treated as opaque."
+            ),
+        },
+        "md5": {
+            "type": "string",
+            "pattern": HEX_ANY,
+            "description": (
+                "The container's whole-file hash, per hash_algorithm; authenticates the "
+                "container byte-for-byte."
+            ),
+        },
+        "size": {"type": "integer", "minimum": 0, "description": "Container size in bytes."},
+        "etag": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The container's native HTTP/S3 validator, as observed.",
+        },
+        "version_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The container's provider-native object version id.",
+        },
     },
 }
 
@@ -227,6 +283,15 @@ SCHEMA = {
             "description": (
                 "Hash of the canonicalised files array (spec §4). NOT equal to a DVC .dir "
                 "hash - see docs/decisions.md D-01."
+            ),
+        },
+        "containers": {
+            "type": "array",
+            "items": CONTAINER,
+            "description": (
+                "(2.0) Containers (.zip, .tar, ...) that deliver some members. Sorted by "
+                "source_root; source_root values are unique and non-nesting. Present makes "
+                "the manifest 2.0."
             ),
         },
         "files": {

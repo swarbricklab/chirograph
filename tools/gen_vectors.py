@@ -31,6 +31,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from chirograph.canonical import (
+    canonical_document_text,
     canonical_text,
     compute_body_hash,
     dvc_dir_bytes,
@@ -417,6 +418,91 @@ MINOR_1_MANIFEST = {
 }
 MINOR_1_MANIFEST["body_hash"] = compute_body_hash(MINOR_1_MANIFEST["files"], "md5")  # type: ignore[arg-type]
 
+# --------------------------------------------------------------------------- #
+# Container (2.0) canonicalisation cases — the two-key {containers, files} form.
+# Each case is (name, why, hash_algorithm, containers, files). Unlike the files-
+# only cases there is no dvc_dir (DVC .dir drops containers entirely).
+# --------------------------------------------------------------------------- #
+
+CONTAINER_CASES: list[tuple[str, str, str, list[dict[str, object]], list[dict[str, object]]]] = [
+    (
+        "container-body",
+        "(2.0) A ZIP container plus one member carrying crc32. body_hash is over the "
+        "two-key {containers, files} document (container-model §4): sort_keys fixes the "
+        "top-level order as 'containers' then 'files', each array pre-sorted by its own "
+        "key, container fields sorted alphabetically (format, md5, size, source_root).",
+        "md5",
+        [{"source_root": "data.zip", "format": "zip", "md5": MD5_C, "size": 15728640}],
+        [
+            {
+                "relpath": "sampleA/matrix.mtx",
+                "md5": MD5_A,
+                "size": 6,
+                "source_path": "data.zip/sampleA/matrix.mtx",
+                "crc32": "df2441b0",
+            }
+        ],
+    ),
+    (
+        "container-multi-sorted",
+        "(2.0) Two containers given out of order, to pin that containers sort by "
+        "source_root just as files sort by relpath.",
+        "md5",
+        [
+            {"source_root": "z.zip", "format": "zip", "md5": MD5_B},
+            {"source_root": "a.tar.gz", "format": "tar.gz", "md5": MD5_C},
+        ],
+        [
+            {"relpath": "one", "md5": MD5_A, "size": 6, "source_path": "z.zip/one"},
+            {"relpath": "two", "md5": MD5_B, "size": 6, "source_path": "a.tar.gz/two"},
+        ],
+    ),
+]
+
+# A valid 2.0 document: a container block + a member. Separate from the 1.x
+# manifests so their frozen vectors are never disturbed.
+MINOR_2_MANIFEST = {
+    "schema": "chirograph",
+    "schema_version": "2.0",
+    "hash_algorithm": "md5",
+    "provenance_type": "observed-download",
+    "record_accession": "10.5281/zenodo.7654321",
+    "source_url": "zenodo://10.5281/zenodo.7654321",
+    "created": "2026-09-06T00:00:00Z",
+    "retrieved": "2026-09-06T00:00:00Z",
+    "generator": "chirograph 0.1.0",
+    "size": 6,
+    "nfiles": 1,
+    "body_hash": "",  # filled in below
+    "containers": [{"source_root": "data.zip", "format": "zip", "md5": MD5_C, "size": 15728640}],
+    "files": [
+        {
+            "relpath": "sampleA/matrix.mtx",
+            "md5": MD5_A,
+            "size": 6,
+            "source_path": "data.zip/sampleA/matrix.mtx",
+            "crc32": "df2441b0",
+        }
+    ],
+}
+MINOR_2_MANIFEST["body_hash"] = compute_body_hash(
+    MINOR_2_MANIFEST["files"],  # type: ignore[arg-type]
+    "md5",
+    containers=MINOR_2_MANIFEST["containers"],  # type: ignore[arg-type]
+)
+
+
+def _container_mutate(**changes: object) -> dict[str, object]:
+    """A copy of MINOR_2_MANIFEST with *changes* applied (for reject cases).
+
+    body_hash need not be recomputed: the container/member rules are enforced
+    during construction (``Manifest.__post_init__``), before the body_hash check.
+    """
+    document = json.loads(json.dumps(MINOR_2_MANIFEST))
+    for key, value in changes.items():
+        document[key] = value
+    return document
+
 
 def _mutate(**changes: object) -> dict[str, object]:
     document = json.loads(json.dumps(GOOD_MANIFEST))
@@ -437,9 +523,11 @@ BAD_MANIFESTS: list[dict[str, object]] = [
     },
     {
         "name": "future-major-version",
-        "why": "A differing MAJOR version means the reader cannot be trusted to interpret it.",
+        "why": "A MAJOR version beyond what the reader implements (major 2) means it "
+        "cannot be trusted to interpret the document. (2.0 is now a supported major — "
+        "the container block — so the too-new major is 3.)",
         "error": "UnsupportedVersion",
-        "document": _mutate(schema_version="2.0"),
+        "document": _mutate(schema_version="3.0"),
     },
     {
         "name": "etag-algorithm",
@@ -527,6 +615,46 @@ BAD_MANIFESTS: list[dict[str, object]] = [
         "error": "SchemaError",
         "document": _mutate(hash_algorithm="sha256"),
     },
+    {
+        "name": "crc32-without-container",
+        "why": "(2.0) A member carrying crc32 but no container to anchor it can never be "
+        "confirmed (container-model §8).",
+        "error": "SchemaError",
+        "document": _mutate(
+            files=[{"relpath": "a.txt", "md5": MD5_A, "size": 6, "crc32": "deadbeef"}]
+        ),
+    },
+    {
+        "name": "nested-containers",
+        "why": "(2.0) One source_root nested under another is ambiguous for member "
+        "matching and is forbidden (container-model §8).",
+        "error": "SchemaError",
+        "document": _container_mutate(
+            containers=[
+                {"source_root": "data.zip", "format": "zip", "md5": MD5_C},
+                {"source_root": "data.zip/inner", "format": "zip", "md5": MD5_B},
+            ],
+            files=[
+                {
+                    "relpath": "x",
+                    "md5": MD5_A,
+                    "size": 6,
+                    "source_path": "data.zip/inner/x",
+                }
+            ],
+        ),
+    },
+    {
+        "name": "orphan-container",
+        "why": "(2.0) A declared container with no member under its source_root (spec §8).",
+        "error": "SchemaError",
+        "document": _container_mutate(
+            containers=[
+                {"source_root": "data.zip", "format": "zip", "md5": MD5_C},
+                {"source_root": "empty.zip", "format": "zip", "md5": MD5_B},
+            ]
+        ),
+    },
 ]
 
 
@@ -551,10 +679,28 @@ def build() -> dict[str, object]:
             }
         )
 
+    container_cases = []
+    for name, why, algorithm, containers, entries in CONTAINER_CASES:
+        canonical = canonical_document_text(containers, entries)
+        raw = canonical.encode("utf-8")
+        container_cases.append(
+            {
+                "name": name,
+                "why": why,
+                "hash_algorithm": algorithm,
+                "containers": containers,
+                "files": entries,
+                "canonical": canonical,
+                "canonical_utf8_bytes": len(raw),
+                "canonical_sha256": hash_bytes(raw, "sha256"),
+                "body_hash": compute_body_hash(entries, algorithm, containers=containers),
+            }
+        )
+
     return {
         "format": "chirograph-test-vectors",
         "format_version": "1.0",
-        "spec_version": "1.1",
+        "spec_version": "2.0",
         "spec_sections": ["§3.2", "§4", "§8", "§9"],
         "$comment": (
             "FROZEN. These are conformance vectors for the .chiro.json canonicalisation "
@@ -573,6 +719,7 @@ def build() -> dict[str, object]:
             "no size field) and therefore a different hash — see docs/decisions.md D-01."
         ),
         "canonicalisation": cases,
+        "container_canonicalisation": container_cases,
         "path_safety": {
             "$comment": (
                 "Paths that must be accepted and rejected on READ as well as write "
@@ -601,6 +748,12 @@ def build() -> dict[str, object]:
                     "record_version in the header, file_version per entry. Must load, and "
                     "schema_version is 1.1 because 1.1 fields are present.",
                     "document": MINOR_1_MANIFEST,
+                },
+                {
+                    "name": "minor-2-container",
+                    "why": "(2.0) A container block plus a ZIP member with crc32. Must load; "
+                    "body_hash is over the two-key {containers, files} document.",
+                    "document": MINOR_2_MANIFEST,
                 },
             ],
             "invalid": BAD_MANIFESTS,

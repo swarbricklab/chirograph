@@ -1062,6 +1062,7 @@ def cmd_info(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         "registry_shard_path": reference.shard_path,
         "dvc_dir_hash": manifest.dvc_dir_hash(),
         "relocated_entries": sum(1 for entry in manifest.files if entry.relocated),
+        "containers": [container.to_dict() for container in manifest.containers],
         "lint": [finding.to_dict() for finding in manifest.lint()],
     }
     if args.json:

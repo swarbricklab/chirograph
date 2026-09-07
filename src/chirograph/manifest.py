@@ -18,8 +18,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .canonical import compute_body_hash, dvc_dir_hash, normalise_entries
+from .canonical import compute_body_hash, dvc_dir_hash, normalise_containers, normalise_entries
 from .constants import (
+    CONTAINER_FIELD_ORDER,
+    CONTAINER_FORMAT_FALLBACK_CLASS,
+    CONTAINER_FORMATS,
     DEFAULT_HASH_ALGORITHM,
     ENTRY_FIELD_ORDER,
     HASH_ALGORITHMS,
@@ -28,13 +31,15 @@ from .constants import (
     PROVENANCE_OBSERVED,
     PROVENANCE_SELF,
     PROVENANCE_TYPES,
+    REQUIRED_CONTAINER_FIELDS,
     REQUIRED_ENTRY_FIELDS,
     REQUIRED_HEADER_FIELDS,
     SCHEMA,
     SCHEMA_VERSION,
+    SCHEMA_VERSION_MAJOR_2,
     SCHEMA_VERSION_MINOR_1,
     SUPPORTED_MAJOR,
-    SUPPORTED_MINOR,
+    SUPPORTED_MINORS,
 )
 from .errors import (
     BodyHashMismatch,
@@ -47,6 +52,7 @@ from .paths import join_source_url, lint_paths, nfc, validate_path
 from .timestamps import canonical_timestamp, now_timestamp
 
 __all__ = [
+    "Container",
     "FetchItem",
     "FileEntry",
     "Lint",
@@ -68,7 +74,8 @@ _DIGEST_LENGTHS = frozenset(HASH_ALGORITHMS.values())
 _MISSING: Any = object()
 
 _KNOWN_ENTRY_FIELDS = frozenset(ENTRY_FIELD_ORDER)
-_KNOWN_HEADER_FIELDS = frozenset([*HEADER_FIELD_ORDER, "files"])
+_KNOWN_CONTAINER_FIELDS = frozenset(CONTAINER_FIELD_ORDER)
+_KNOWN_HEADER_FIELDS = frozenset([*HEADER_FIELD_ORDER, "files", "containers"])
 
 
 # --------------------------------------------------------------------------- #
@@ -128,6 +135,12 @@ class FileEntry:
     #: say). Advisory only, and covered by ``body_hash`` like every entry field.
     #: See spec §3.2 / §8.
     file_version: str | None = None
+    #: *(2.0)* Hex CRC-32 of the member's *uncompressed* bytes, from a ZIP central
+    #: directory — the coordinate for download-free confirmation of a ZIP member.
+    #: Weak (32-bit, forgeable); a cheap cross-check, never a content-address. Only
+    #: meaningful for a member sitting under a ``zip`` container. See
+    #: docs/container-model.md §6.
+    crc32: str | None = None
     #: Fields not in the format, preserved verbatim when the caller opted into
     #: tolerating them. Included in canonicalisation, so they *are* covered by
     #: ``body_hash``.
@@ -255,7 +268,7 @@ class FileEntry:
         if isexec is not None and not isinstance(isexec, bool):
             raise SchemaError(f"{where}.isexec must be a boolean, got {type(isexec).__name__}")
 
-        for optional in ("version_id", "etag", "file_version"):
+        for optional in ("version_id", "etag", "file_version", "crc32"):
             value = payload.get(optional)
             if value is not None and not isinstance(value, str):
                 raise SchemaError(
@@ -271,6 +284,7 @@ class FileEntry:
             version_id=payload.get("version_id"),
             etag=payload.get("etag"),
             file_version=payload.get("file_version"),
+            crc32=payload.get("crc32"),
             extra={k: payload[k] for k in sorted(unknown)},
         )
 
@@ -293,6 +307,108 @@ class FetchItem:
     @property
     def digest(self) -> str:
         return self.md5
+
+
+@dataclass(frozen=True)
+class Container:
+    """A container (`.zip`, `.tar`, …) that delivers some of a manifest's files.
+
+    *(schema 2.0, docs/container-model.md.)* A container is a source-side fetchable
+    object — bytes, an md5, a size, a source location — but **not** a workspace
+    file, which is why it lives in its own ``containers`` block rather than as a
+    ``FileEntry`` (it has no ``relpath``). Members link to it by having a
+    ``source_path`` under its :attr:`source_root`; the container's identity is
+    recorded here once.
+    """
+
+    #: The container's path relative to the manifest's ``source_url``. The prefix
+    #: members match against, how the container is fetched, and its primary key.
+    source_root: str
+    #: The archive format, e.g. ``"zip"``, ``"tar"``, ``"tar.gz"`` (container-model
+    #: §3.1). Selects the confirm strategy; an unrecognised value is opaque.
+    format: str
+    #: The container's whole-file hash, per the manifest's ``hash_algorithm``.
+    md5: str
+    size: int | None = None
+    etag: str | None = None
+    version_id: str | None = None
+    extra: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _reject_shadowing(self.extra, _KNOWN_CONTAINER_FIELDS, where="a container")
+
+    @property
+    def confirm_class(self) -> str:
+        """The download-free-confirm class of this container's format (§6).
+
+        ``"indexed"`` / ``"sequential"`` / ``"stream"``; an unrecognised format is
+        ``"stream"`` (opaque), so a newer format is still usable, just not cheaply
+        confirmable. chirograph owns this mapping so consumers need not hard-code it.
+        """
+        return CONTAINER_FORMATS.get(self.format, CONTAINER_FORMAT_FALLBACK_CLASS)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise in the format's field order, omitting absent fields."""
+        out: dict[str, Any] = {}
+        for name in CONTAINER_FIELD_ORDER:
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        out.update(self.extra)
+        return out
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Mapping[str, Any],
+        *,
+        algorithm: str = DEFAULT_HASH_ALGORITHM,
+        allow_unknown_fields: bool = False,
+        where: str = "containers[?]",
+    ) -> Container:
+        if not isinstance(data, Mapping):
+            raise SchemaError(f"{where} must be an object, got {type(data).__name__}")
+
+        missing = REQUIRED_CONTAINER_FIELDS - data.keys()
+        if missing:
+            raise SchemaError(f"{where} is missing required field(s): {', '.join(sorted(missing))}")
+
+        unknown = data.keys() - _KNOWN_CONTAINER_FIELDS
+        if unknown and not allow_unknown_fields:
+            raise SchemaError(
+                f"{where} has unrecognised field(s) {', '.join(sorted(unknown))}. "
+                f"Pass allow_unknown_fields=True to preserve them verbatim."
+            )
+
+        source_root = validate_path(data["source_root"], field=f"{where}.source_root")
+
+        fmt = data["format"]
+        if not isinstance(fmt, str) or not fmt:
+            raise SchemaError(f"{where}.format must be a non-empty string, got {fmt!r}")
+
+        size = data.get("size")
+        if size is not None:
+            if isinstance(size, bool) or not isinstance(size, int):
+                raise SchemaError(f"{where}.size must be an integer, got {type(size).__name__}")
+            if size < 0:
+                raise SchemaError(f"{where}.size must not be negative, got {size}")
+
+        for optional in ("etag", "version_id"):
+            value = data.get(optional)
+            if value is not None and not isinstance(value, str):
+                raise SchemaError(
+                    f"{where}.{optional} must be a string, got {type(value).__name__}"
+                )
+
+        return cls(
+            source_root=source_root,
+            format=fmt,
+            md5=check_digest(data["md5"], algorithm, field=f"{where}.md5"),
+            size=size,
+            etag=data.get("etag"),
+            version_id=data.get("version_id"),
+            extra={k: data[k] for k in sorted(unknown)},
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -327,6 +443,10 @@ class Manifest:
     #: form the archive exposes (a date, a version DOI, a serial). Advisory —
     #: compared for change only, never authoritative for content. Spec §3.1 / §8.
     record_version: str | None = None
+    #: *(2.0)* Containers (`.zip`, `.tar`, …) that deliver some of ``files``
+    #: (docs/container-model.md). A manifest carrying any is ``2.0``; one carrying
+    #: none stays ``1.x`` and byte-identical.
+    containers: list[Container] = field(default_factory=list)
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -341,11 +461,61 @@ class Manifest:
         if self.retrieved is not None:
             self.retrieved = canonical_timestamp(self.retrieved, field="retrieved")
         self.files = normalise_order(self.files)
-        # A manifest that uses a 1.1 field must advertise at least 1.1; one that
-        # uses none keeps whatever it declared (default 1.0), so every existing
-        # manifest stays byte-identical.
-        if self._uses_minor_1_fields() and _parse_version(self.schema_version) < (1, 1):
+        self.containers = _normalise_container_order(self.containers)
+        self._validate_containers()
+        # A manifest advertises the lowest version whose features it uses, so a
+        # manifest that uses none of them stays byte-identical to a 1.0 file. The
+        # tier ladder: containers ⇒ 2.0, else a 1.1 field ⇒ 1.1, else 1.0.
+        declared = _parse_version(self.schema_version)
+        if self.containers and declared < (2, 0):
+            self.schema_version = SCHEMA_VERSION_MAJOR_2
+        elif not self.containers and self._uses_minor_1_fields() and declared < (1, 1):
             self.schema_version = SCHEMA_VERSION_MINOR_1
+
+    def _validate_containers(self) -> None:
+        """Enforce the container/member integrity rules (container-model §8)."""
+        if not self.containers:
+            # A crc32 with no containers is a mis-built manifest: it can never be
+            # confirmed, because there is no container to anchor it.
+            for entry in self.files:
+                if entry.crc32 is not None:
+                    raise SchemaError(
+                        f"entry {entry.relpath!r} has a crc32 but the manifest declares no "
+                        f"containers; crc32 is only meaningful for a member of a container"
+                    )
+            return
+        roots = [c.source_root for c in self.containers]
+        # No source_root may be a prefix of another (no nested containers), so a
+        # member matches at most one container and matching needs no tie-break.
+        for a in roots:
+            for b in roots:
+                if a is not b and _is_under(a, b):
+                    raise SchemaError(
+                        f"container source_root {a!r} is nested under {b!r}; nested "
+                        f"containers are not allowed"
+                    )
+        members_per_root = dict.fromkeys(roots, 0)
+        for entry in self.files:
+            root = self._container_root_for(entry.source)
+            if root is not None:
+                members_per_root[root] += 1
+            elif entry.crc32 is not None:
+                raise SchemaError(
+                    f"entry {entry.relpath!r} has a crc32 but its source path {entry.source!r} "
+                    f"is under no declared container source_root"
+                )
+        for root, count in members_per_root.items():
+            if count == 0:
+                raise SchemaError(
+                    f"container {root!r} has no members (no file's source path is under it)"
+                )
+
+    def _container_root_for(self, source_path: str) -> str | None:
+        """The `source_root` of the container delivering *source_path*, or None."""
+        for container in self.containers:
+            if _is_under(source_path, container.source_root):
+                return container.source_root
+        return None
 
     def _uses_minor_1_fields(self) -> bool:
         """Whether any field introduced in 1.1 is populated (spec §8)."""
@@ -370,7 +540,11 @@ class Manifest:
     @property
     def body_hash(self) -> str:
         """Layer-2 hash over the canonicalised ``files`` array (spec §4)."""
-        return compute_body_hash([entry.to_dict() for entry in self.files], self.hash_algorithm)
+        return compute_body_hash(
+            [entry.to_dict() for entry in self.files],
+            self.hash_algorithm,
+            containers=[c.to_dict() for c in self.containers] or None,
+        )
 
     def dvc_dir_hash(self) -> str:
         """The hash DVC would assign the equivalent ``.dir`` object.
@@ -548,6 +722,8 @@ class Manifest:
         }
         out = {name: header[name] for name in HEADER_FIELD_ORDER if header[name] is not None}
         out.update(self.extra)
+        if self.containers:
+            out["containers"] = [container.to_dict() for container in self.containers]
         out["files"] = [entry.to_dict() for entry in self.files]
         return out
 
@@ -604,13 +780,16 @@ class Manifest:
 
         version = data.get("schema_version")
         major, minor = _parse_version(version)
-        if major != SUPPORTED_MAJOR:
+        if major < 1 or major > SUPPORTED_MAJOR:
             raise UnsupportedVersion(
                 f"schema_version {version!r} has major version {major}; this implementation "
-                f"supports major version {SUPPORTED_MAJOR} only"
+                f"supports major version(s) {', '.join(str(m) for m in sorted(SUPPORTED_MINORS))}"
             )
         if allow_unknown_fields is None:
-            allow_unknown_fields = minor > SUPPORTED_MINOR
+            # Strict at a version we implement; lenient (tolerate + preserve unknown
+            # fields) for a higher minor of a major we know.
+            known_minor = SUPPORTED_MINORS.get(major)
+            allow_unknown_fields = known_minor is None or minor > known_minor
 
         missing = REQUIRED_HEADER_FIELDS - data.keys()
         if missing:
@@ -642,6 +821,19 @@ class Manifest:
             for index, entry in enumerate(raw_files)
         ]
 
+        raw_containers = data.get("containers", [])
+        if isinstance(raw_containers, (str, bytes)) or not isinstance(raw_containers, Sequence):
+            raise SchemaError(f"'containers' must be an array, got {type(raw_containers).__name__}")
+        containers = [
+            Container.from_dict(
+                container,
+                algorithm=algorithm,
+                allow_unknown_fields=allow_unknown_fields,
+                where=f"containers[{index}]",
+            )
+            for index, container in enumerate(raw_containers)
+        ]
+
         manifest = cls(
             provenance_type=_require_str(data, "provenance_type"),
             files=entries,
@@ -654,6 +846,7 @@ class Manifest:
             retrieved=_optional_str(data, "retrieved"),
             record_version=_optional_str(data, "record_version"),
             generator=_optional_str(data, "generator"),
+            containers=containers,
             extra={key: data[key] for key in sorted(unknown)},
         )
 
@@ -890,6 +1083,47 @@ def normalise_order(files: Sequence[FileEntry]) -> list[FileEntry]:
     ordered = normalise_entries([entry.to_dict() for entry in normalised])
     by_path = {entry.relpath: entry for entry in normalised}
     return [by_path[str(row["relpath"])] for row in ordered]
+
+
+def _is_under(path: str, root: str) -> bool:
+    """Whether *path* names something inside container *root* (spec §8 linkage).
+
+    Membership requires a ``"/"`` boundary, so ``data.zip.bak/x`` is not under
+    ``data.zip``, and a path equal to the root is not "under" it (a container is
+    not its own member).
+    """
+    return path.startswith(root + "/")
+
+
+def _normalise_container_order(containers: Sequence[Container]) -> list[Container]:
+    """Sort containers into canonical order (by ``source_root``), reject duplicates.
+
+    Mirrors :func:`normalise_order`: NFC-normalise ``source_root`` and delegate the
+    ordering and duplicate rejection to :func:`chirograph.canonical.normalise_containers`,
+    so the on-disk order is provably the order that gets hashed.
+    """
+    normalised: list[Container] = []
+    for index, container in enumerate(containers):
+        root = getattr(container, "source_root", _MISSING)
+        if root is _MISSING:
+            raise SchemaError(f"containers[{index}] has no 'source_root' attribute")
+        if not isinstance(root, str):
+            raise SchemaError(
+                f"containers[{index}]: 'source_root' must be a string, got {type(root).__name__}"
+            )
+        if not hasattr(container, "to_dict"):
+            raise SchemaError(
+                f"containers[{index}] is not a Container: no 'to_dict' method "
+                f"(got {type(container).__name__})"
+            )
+        nfc_root = nfc(root)
+        if nfc_root != root:
+            container = replace(container, source_root=nfc_root)
+        normalised.append(container)
+
+    ordered = normalise_containers([c.to_dict() for c in normalised])
+    by_root = {c.source_root: c for c in normalised}
+    return [by_root[str(row["source_root"])] for row in ordered]
 
 
 def _parse_version(value: object) -> tuple[int, int]:

@@ -7,6 +7,18 @@ the **`.chiro.json` format version** (`schema_version`) it implements.
 
 ## [Unreleased]
 
+### Format (`schema_version`)
+
+- **`2.0`** — an optional top-level `containers` block describing archive containers
+  (`.zip`, `.tar`, `.tar.gz`, …) and their members, for member-granular provenance and
+  download-free confirmation of ZIP members (`docs/container-model.md`, spec §9). Members
+  link to a container by `source_path` under its `source_root`; a per-member `crc32`
+  (ZIP) is the cheap cross-check. A manifest is `2.0` **iff** it carries containers, so
+  every `1.x` manifest is byte-for-byte unchanged; `body_hash` then covers the
+  `{containers, files}` document. A container's `format` selects the confirm strategy,
+  and an unrecognised format is treated as opaque rather than rejected.
+- New public API: the `Container` dataclass; `chiro info` reports `containers`.
+
 ## [0.1.0] — 2026-09-06
 
 First tagged release: Milestones 0 & 1 — the frozen `.chiro.json` format, the reference

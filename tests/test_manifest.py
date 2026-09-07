@@ -15,7 +15,7 @@ from chirograph.errors import (
     UnsupportedAlgorithm,
     UnsupportedVersion,
 )
-from chirograph.manifest import FileEntry, Manifest
+from chirograph.manifest import Container, FileEntry, Manifest
 from chirograph.paths import validate_path
 
 MD5_A = "b1946ac92492d2347c6235b4d2611184"
@@ -181,8 +181,9 @@ def test_wrong_schema_token_rejected() -> None:
 
 
 def test_future_major_version_rejected() -> None:
+    # 2.0 is now a supported major (the container block); 3.0 is the too-new one.
     with pytest.raises(UnsupportedVersion, match="major version"):
-        Manifest.from_dict(document(schema_version="2.0"))
+        Manifest.from_dict(document(schema_version="3.0"))
 
 
 def test_higher_minor_version_is_tolerated_and_relaxes_unknown_fields() -> None:
@@ -263,6 +264,93 @@ def test_minor_1_null_file_version_is_treated_as_absent() -> None:
     manifest = Manifest.from_dict(payload)
     assert manifest.files[0].file_version is None
     assert "file_version" not in manifest.to_dict()["files"][0]
+
+
+# --------------------------------------------------------------------------- #
+# 2.0 containers (docs/container-model.md)
+# --------------------------------------------------------------------------- #
+
+
+def _container_manifest(**overrides):
+    kwargs = {
+        "provenance_type": "observed-download",
+        "source_url": "zenodo://1",
+        "created": "2026-09-06T00:00:00Z",
+        "retrieved": "2026-09-06T00:00:00Z",
+        "containers": [Container(source_root="data.zip", format="zip", md5="c" * 32, size=100)],
+        "files": [
+            FileEntry("sampleA/x", MD5_A, 6, source_path="data.zip/sampleA/x", crc32="df2441b0")
+        ],
+    }
+    kwargs.update(overrides)
+    return Manifest(**kwargs)
+
+
+def test_containers_make_it_2_0_and_enter_body_hash() -> None:
+    with_containers = _container_manifest()
+    assert with_containers.schema_version == "2.0"
+    # Same files, no containers -> different body_hash (containers are in the body).
+    plain = Manifest(
+        files=[FileEntry("sampleA/x", MD5_A, 6, source_path="loose/x")],
+        provenance_type="observed-download",
+        source_url="zenodo://1",
+        created="2026-09-06T00:00:00Z",
+        retrieved="2026-09-06T00:00:00Z",
+    )
+    assert plain.schema_version == "1.0"
+    assert with_containers.body_hash != plain.body_hash
+
+
+def test_container_round_trips_and_reproduces_body_hash() -> None:
+    m = _container_manifest()
+    back = Manifest.from_dict(m.to_dict())
+    assert back.schema_version == "2.0"
+    assert back.containers[0].source_root == "data.zip"
+    assert back.containers[0].format == "zip"
+    assert back.containers[0].confirm_class == "indexed"
+    assert back.files[0].crc32 == "df2441b0"
+    assert back.body_hash == m.body_hash
+
+
+def test_no_containers_stays_1_x_byte_identical() -> None:
+    # The backward-compat lever: a container-less manifest is untouched by 2.0.
+    assert sample().schema_version == "1.0"
+    assert "containers" not in sample().to_dict()
+
+
+def test_crc32_without_container_rejected() -> None:
+    with pytest.raises(SchemaError, match="crc32"):
+        Manifest(files=[FileEntry("a", MD5_A, 6, crc32="deadbeef")])
+
+
+def test_nested_source_roots_rejected() -> None:
+    with pytest.raises(SchemaError, match="nested"):
+        _container_manifest(
+            containers=[
+                Container(source_root="data.zip", format="zip", md5="c" * 32),
+                Container(source_root="data.zip/inner", format="zip", md5="d" * 32),
+            ],
+            files=[FileEntry("x", MD5_A, 6, source_path="data.zip/inner/x")],
+        )
+
+
+def test_orphan_container_rejected() -> None:
+    with pytest.raises(SchemaError, match="no members"):
+        _container_manifest(
+            containers=[
+                Container(source_root="data.zip", format="zip", md5="c" * 32),
+                Container(source_root="empty.zip", format="zip", md5="d" * 32),
+            ]
+        )
+
+
+def test_unknown_container_format_is_opaque_not_rejected() -> None:
+    # Forward-compat: a format we don't know is accepted, class "stream".
+    m = _container_manifest(
+        containers=[Container(source_root="data.rar", format="rar", md5="c" * 32)],
+        files=[FileEntry("x", MD5_A, 6, source_path="data.rar/x")],
+    )
+    assert m.containers[0].confirm_class == "stream"
 
 
 def test_unknown_header_field_rejected_at_our_own_version() -> None:

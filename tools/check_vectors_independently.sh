@@ -19,13 +19,16 @@ VECTORS="$(dirname "$0")/../src/chirograph/vectors/canonicalisation.json"
 [[ -f $VECTORS ]] || { echo "vectors not found at $VECTORS" >&2; exit 2; }
 
 if command -v jq >/dev/null 2>&1; then
-    extract() { jq -r '.canonicalisation[] | [.name, .hash_algorithm, .body_hash, .canonical_sha256, (.canonical|@base64)] | @tsv' "$VECTORS"; }
+    # Both the files-only and the 2.0 container ({containers, files}) canonical
+    # forms — each carries a literal `canonical` string and a `body_hash` over it.
+    extract() { jq -r '(.canonicalisation + (.container_canonicalisation // []))[] | [.name, .hash_algorithm, .body_hash, .canonical_sha256, (.canonical|@base64)] | @tsv' "$VECTORS"; }
 else
     echo "note: jq not found; using python for JSON extraction only (hashing still external)" >&2
     extract() {
         python3 - "$VECTORS" <<'PY'
 import base64, json, sys
-for case in json.load(open(sys.argv[1]))["canonicalisation"]:
+data = json.load(open(sys.argv[1]))
+for case in [*data["canonicalisation"], *data.get("container_canonicalisation", [])]:
     print("\t".join([
         case["name"], case["hash_algorithm"], case["body_hash"], case["canonical_sha256"],
         base64.b64encode(case["canonical"].encode("utf-8")).decode(),
