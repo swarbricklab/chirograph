@@ -7,6 +7,12 @@ the **`.chiro.json` format version** (`schema_version`) it implements.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-07
+
+A backward-compatible release: the library reads and writes `.chiro.json` schema
+versions `1.0`, `1.1`, and now `2.0`. Nothing in the library API changed for existing
+callers; every `1.x` manifest is byte-for-byte unchanged.
+
 ### Format (`schema_version`)
 
 - **`2.0`** — an optional top-level `containers` block describing archive containers
@@ -67,5 +73,6 @@ library, and the CLI.
 - Not yet on PyPI; install from the tag
   (`pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"`).
 
-[Unreleased]: https://github.com/Swarbricklab/chirograph/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Swarbricklab/chirograph/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Swarbricklab/chirograph/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Swarbricklab/chirograph/releases/tag/v0.1.0
