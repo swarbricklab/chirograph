@@ -165,6 +165,7 @@ registry is an optimisation over that baseline rather than a prerequisite.
 - **`chiro://` resolution and config:** [`docs/resolution-and-config.md`](docs/resolution-and-config.md) *(design, largely unbuilt)*
 - **Updatability & `dvc update`:** [`docs/updatability-and-dvc-update.md`](docs/updatability-and-dvc-update.md) *(design; cross-project, with measured findings)*
 - **Drift-check & update design:** [`docs/design-check-and-update.md`](docs/design-check-and-update.md) *(design, unbuilt)*
+- **Container model (ZIP members, schema 2.0):** [`docs/container-model.md`](docs/container-model.md) *(design of record, unbuilt)*
 - **Manifest registry design:** [`docs/manifest-registry-design.md`](docs/manifest-registry-design.md) *(design, deferred)*
 - **Implementation plan / status:** [`docs/plan.md`](docs/plan.md)
 - **Decisions taken while implementing:** [`docs/decisions.md`](docs/decisions.md) — dated record; its spec section numbers refer to spec v0.3, before the split

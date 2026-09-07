@@ -29,6 +29,7 @@ ASPIRATIONAL = {
     "resolution-and-config.md",
     "updatability-and-dvc-update.md",
     "design-check-and-update.md",
+    "container-model.md",
 }
 
 
