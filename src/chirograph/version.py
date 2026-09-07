@@ -4,7 +4,10 @@ from __future__ import annotations
 
 __all__ = ["GENERATOR", "__version__", "version"]
 
-_FALLBACK = "0.1.0"
+#: Used only when the package is not installed (running straight from a source
+#: tree, so ``importlib.metadata`` has nothing). MUST match ``pyproject`` on every
+#: release; ``tests/test_version.py`` enforces that so it cannot drift again.
+_FALLBACK = "0.2.0"
 
 
 def _detect() -> str:
