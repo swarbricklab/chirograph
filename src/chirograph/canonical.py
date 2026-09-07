@@ -52,16 +52,22 @@ from .hashing import hash_bytes
 from .paths import nfc
 
 __all__ = [
+    "canonical_document_text",
     "canonical_text",
     "canonicalise",
+    "canonicalise_document",
     "compute_body_hash",
     "dvc_dir_bytes",
     "dvc_dir_hash",
+    "normalise_containers",
     "normalise_entries",
 ]
 
 #: Path-valued entry fields, which are NFC-normalised before sorting.
 _PATH_FIELDS = ("relpath", "source_path")
+
+#: The container's primary key and only path-valued field (spec §8 / container-model).
+_CONTAINER_PATH_FIELDS = ("source_root",)
 
 Entry = Mapping[str, Any]
 
@@ -100,32 +106,41 @@ def _check_scalar(key: str, value: Any, *, where: str) -> Any:
     return value
 
 
-def normalise_entries(files: Sequence[Entry]) -> list[dict[str, Any]]:
-    """Return *files* as plain dicts, NFC-normalised and sorted by ``relpath``.
+def _normalise_rows(
+    rows: Sequence[Entry],
+    *,
+    key_field: str,
+    path_fields: tuple[str, ...],
+    where_prefix: str,
+) -> list[dict[str, Any]]:
+    """NFC-normalise path fields, sort by *key_field*, reject duplicates.
 
-    The array half of canonicalisation, exposed separately so a caller can see
-    exactly which entries went into a hash (``chiro info``, diagnostics) without
-    re-deriving the ordering.
+    The shared core of :func:`normalise_entries` (``files``) and
+    :func:`normalise_containers` (``containers``). The two differ only in their
+    key field and which fields are paths; every rule — scalar-only, normalise
+    *then* sort, sort by the joined string, reject duplicate keys — is identical,
+    because a manifest's ``files`` and ``containers`` arrays canonicalise by the
+    same §4 rules.
     """
     # Guard against untyped callers (JSON straight off disk), which is why this
     # narrows an `object` rather than the annotated parameter.
-    candidate: object = files
+    candidate: object = rows
     if isinstance(candidate, (str, bytes)) or not isinstance(candidate, Sequence):
-        raise SchemaError(f"files must be an array, got {type(files).__name__}")
+        raise SchemaError(f"{where_prefix} must be an array, got {type(rows).__name__}")
 
     normalised: list[dict[str, Any]] = []
-    for index, entry in enumerate(files):
-        where = f"files[{index}]"
+    for index, entry in enumerate(rows):
+        where = f"{where_prefix}[{index}]"
         if not isinstance(entry, Mapping):
             raise SchemaError(f"{where} must be an object, got {type(entry).__name__}")
-        if "relpath" not in entry:
-            raise SchemaError(f"{where} has no 'relpath'")
+        if key_field not in entry:
+            raise SchemaError(f"{where} has no {key_field!r}")
         out: dict[str, Any] = {}
         for key, value in entry.items():
             if not isinstance(key, str):
                 raise SchemaError(f"{where} has a non-string key {key!r}")
             _check_scalar(key, value, where=where)
-            if key in _PATH_FIELDS:
+            if key in path_fields:
                 if not isinstance(value, str):
                     raise SchemaError(f"{where}: {key!r} must be a string")
                 out[key] = nfc(value)
@@ -133,16 +148,42 @@ def normalise_entries(files: Sequence[Entry]) -> list[dict[str, Any]]:
                 out[key] = value
         normalised.append(out)
 
-    normalised.sort(key=lambda entry: str(entry["relpath"]))
+    normalised.sort(key=lambda entry: str(entry[key_field]))
 
     for previous, current in pairwise(normalised):
-        if previous["relpath"] == current["relpath"]:
+        if previous[key_field] == current[key_field]:
             raise SchemaError(
-                f"duplicate relpath {current['relpath']!r}: relpath is an entry's "
+                f"duplicate {key_field} {current[key_field]!r}: {key_field} is an entry's "
                 f"identity within a manifest and must be unique, otherwise there is "
                 f"no canonical ordering"
             )
     return normalised
+
+
+def normalise_entries(files: Sequence[Entry]) -> list[dict[str, Any]]:
+    """Return *files* as plain dicts, NFC-normalised and sorted by ``relpath``.
+
+    The array half of canonicalisation, exposed separately so a caller can see
+    exactly which entries went into a hash (``chiro info``, diagnostics) without
+    re-deriving the ordering.
+    """
+    return _normalise_rows(
+        files, key_field="relpath", path_fields=_PATH_FIELDS, where_prefix="files"
+    )
+
+
+def normalise_containers(containers: Sequence[Entry]) -> list[dict[str, Any]]:
+    """Return *containers* as plain dicts, NFC-normalised and sorted by ``source_root``.
+
+    The container half of canonicalisation (spec §8). Identical rules to
+    :func:`normalise_entries`; containers are keyed and sorted by ``source_root``.
+    """
+    return _normalise_rows(
+        containers,
+        key_field="source_root",
+        path_fields=_CONTAINER_PATH_FIELDS,
+        where_prefix="containers",
+    )
 
 
 def canonical_text(files: Sequence[Entry]) -> str:
@@ -180,8 +221,52 @@ def canonicalise(files: Sequence[Entry]) -> bytes:
         ) from exc
 
 
-def compute_body_hash(files: Sequence[Entry], algorithm: str = "md5") -> str:
-    """Return the Layer-2 ``body_hash`` of *files* under *algorithm*."""
+def canonical_document_text(containers: Sequence[Entry], files: Sequence[Entry]) -> str:
+    """Canonical serialisation of the two-key ``{containers, files}`` document (spec §8).
+
+    Used for ``body_hash`` when a manifest carries containers. ``sort_keys=True``
+    fixes the top-level order as ``containers`` then ``files``; each array is
+    pre-sorted by its own key. The per-element rules are the same §4 rules as the
+    files-only form — this only wraps two canonical arrays in one object.
+    """
+    return json.dumps(
+        {
+            "containers": normalise_containers(containers),
+            "files": normalise_entries(files),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def canonicalise_document(containers: Sequence[Entry], files: Sequence[Entry]) -> bytes:
+    """UTF-8 bytes of the ``{containers, files}`` canonical document (spec §8)."""
+    text = canonical_document_text(containers, files)
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise SchemaError(
+            f"the canonical form cannot be encoded as UTF-8: {exc}. Some value contains an "
+            f"unpaired surrogate, which usually means a path whose bytes are not valid UTF-8."
+        ) from exc
+
+
+def compute_body_hash(
+    files: Sequence[Entry],
+    algorithm: str = "md5",
+    *,
+    containers: Sequence[Entry] | None = None,
+) -> str:
+    """Return the Layer-2 ``body_hash`` under *algorithm*.
+
+    Over the ``files`` array alone (the frozen §4 form) when *containers* is empty
+    or absent — so every ``1.x`` manifest hashes exactly as before. Over the
+    two-key ``{containers, files}`` document (spec §8) when containers are present,
+    which is what makes such a manifest ``2.0``.
+    """
+    if containers:
+        return hash_bytes(canonicalise_document(containers, files), algorithm)
     return hash_bytes(canonicalise(files), algorithm)
 
 

@@ -19,7 +19,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .canonical import canonical_text, compute_body_hash, dvc_dir_bytes, dvc_dir_hash
+from .canonical import (
+    canonical_document_text,
+    canonical_text,
+    compute_body_hash,
+    dvc_dir_bytes,
+    dvc_dir_hash,
+)
 from .errors import ChirographError
 from .hashing import hash_bytes
 from .manifest import Manifest
@@ -120,6 +126,44 @@ def check_vectors() -> ConformanceResult:
             continue
         if dvc_dir_hash(entries, algorithm) != case["dvc_dir_hash"]:
             result.failures.append(f"canonicalisation/{name}: dvc_dir_hash mismatch")
+            continue
+
+        result.passed += 1
+
+    for case in data.get("container_canonicalisation", []):
+        name = case["name"]
+        algorithm = case["hash_algorithm"]
+        containers = case["containers"]
+        entries = case["files"]
+
+        try:
+            produced = canonical_document_text(containers, entries)
+        except ChirographError as exc:
+            result.failures.append(
+                f"container_canonicalisation/{name}: raised {type(exc).__name__}: {exc}"
+            )
+            continue
+
+        if produced != case["canonical"]:
+            result.failures.append(
+                f"container_canonicalisation/{name}: canonical string mismatch\n"
+                f"    expected: {case['canonical']!r}\n"
+                f"    produced: {produced!r}"
+            )
+            continue
+
+        raw = produced.encode("utf-8")
+        if len(raw) != case["canonical_utf8_bytes"]:
+            result.failures.append(
+                f"container_canonicalisation/{name}: {len(raw)} UTF-8 bytes, "
+                f"expected {case['canonical_utf8_bytes']}"
+            )
+            continue
+        if hash_bytes(raw, "sha256") != case["canonical_sha256"]:
+            result.failures.append(f"container_canonicalisation/{name}: canonical_sha256 mismatch")
+            continue
+        if compute_body_hash(entries, algorithm, containers=containers) != case["body_hash"]:
+            result.failures.append(f"container_canonicalisation/{name}: body_hash mismatch")
             continue
 
         result.passed += 1

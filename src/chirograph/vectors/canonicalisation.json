@@ -1,7 +1,7 @@
 {
   "format": "chirograph-test-vectors",
   "format_version": "1.0",
-  "spec_version": "1.1",
+  "spec_version": "2.0",
   "spec_sections": [
     "\u00a73.2",
     "\u00a74",
@@ -1493,6 +1493,69 @@
       "dvc_dir_hash": "a7fac4a8bcb1dd8a945f770b13a9e174"
     }
   ],
+  "container_canonicalisation": [
+    {
+      "name": "container-body",
+      "why": "(2.0) A ZIP container plus one member carrying crc32. body_hash is over the two-key {containers, files} document (container-model \u00a74): sort_keys fixes the top-level order as 'containers' then 'files', each array pre-sorted by its own key, container fields sorted alphabetically (format, md5, size, source_root).",
+      "hash_algorithm": "md5",
+      "containers": [
+        {
+          "source_root": "data.zip",
+          "format": "zip",
+          "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3",
+          "size": 15728640
+        }
+      ],
+      "files": [
+        {
+          "relpath": "sampleA/matrix.mtx",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6,
+          "source_path": "data.zip/sampleA/matrix.mtx",
+          "crc32": "df2441b0"
+        }
+      ],
+      "canonical": "{\"containers\":[{\"format\":\"zip\",\"md5\":\"5eb63bbbe01eeed093cb22bb8f5acdc3\",\"size\":15728640,\"source_root\":\"data.zip\"}],\"files\":[{\"crc32\":\"df2441b0\",\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"sampleA/matrix.mtx\",\"size\":6,\"source_path\":\"data.zip/sampleA/matrix.mtx\"}]}",
+      "canonical_utf8_bytes": 271,
+      "canonical_sha256": "e4503261c9bff06923249650b8cca286b29e1b6f98a41a3277dcc0cec437695a",
+      "body_hash": "6939c8766c27a722dd5e6ab858edc1e5"
+    },
+    {
+      "name": "container-multi-sorted",
+      "why": "(2.0) Two containers given out of order, to pin that containers sort by source_root just as files sort by relpath.",
+      "hash_algorithm": "md5",
+      "containers": [
+        {
+          "source_root": "z.zip",
+          "format": "zip",
+          "md5": "591785b794601e212b260e25925636fd"
+        },
+        {
+          "source_root": "a.tar.gz",
+          "format": "tar.gz",
+          "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3"
+        }
+      ],
+      "files": [
+        {
+          "relpath": "one",
+          "md5": "b1946ac92492d2347c6235b4d2611184",
+          "size": 6,
+          "source_path": "z.zip/one"
+        },
+        {
+          "relpath": "two",
+          "md5": "591785b794601e212b260e25925636fd",
+          "size": 6,
+          "source_path": "a.tar.gz/two"
+        }
+      ],
+      "canonical": "{\"containers\":[{\"format\":\"tar.gz\",\"md5\":\"5eb63bbbe01eeed093cb22bb8f5acdc3\",\"source_root\":\"a.tar.gz\"},{\"format\":\"zip\",\"md5\":\"591785b794601e212b260e25925636fd\",\"source_root\":\"z.zip\"}],\"files\":[{\"md5\":\"b1946ac92492d2347c6235b4d2611184\",\"relpath\":\"one\",\"size\":6,\"source_path\":\"z.zip/one\"},{\"md5\":\"591785b794601e212b260e25925636fd\",\"relpath\":\"two\",\"size\":6,\"source_path\":\"a.tar.gz/two\"}]}",
+      "canonical_utf8_bytes": 383,
+      "canonical_sha256": "8d4cf2ec0e080f2821197d6ed6bb64846ca8b142478e23120179770d4154bac6",
+      "body_hash": "001012023bfad474e1e4318260a895d0"
+    }
+  ],
   "path_safety": {
     "$comment": "Paths that must be accepted and rejected on READ as well as write (spec \u00a73.2). Rejection is a security boundary: a consumer materialises relpath to disk, and observed-download manifests describe other people's deposits.",
     "accept": [
@@ -1683,6 +1746,41 @@
             }
           ]
         }
+      },
+      {
+        "name": "minor-2-container",
+        "why": "(2.0) A container block plus a ZIP member with crc32. Must load; body_hash is over the two-key {containers, files} document.",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "2.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "10.5281/zenodo.7654321",
+          "source_url": "zenodo://10.5281/zenodo.7654321",
+          "created": "2026-09-06T00:00:00Z",
+          "retrieved": "2026-09-06T00:00:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "6939c8766c27a722dd5e6ab858edc1e5",
+          "containers": [
+            {
+              "source_root": "data.zip",
+              "format": "zip",
+              "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3",
+              "size": 15728640
+            }
+          ],
+          "files": [
+            {
+              "relpath": "sampleA/matrix.mtx",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "source_path": "data.zip/sampleA/matrix.mtx",
+              "crc32": "df2441b0"
+            }
+          ]
+        }
       }
     ],
     "invalid": [
@@ -1714,11 +1812,11 @@
       },
       {
         "name": "future-major-version",
-        "why": "A differing MAJOR version means the reader cannot be trusted to interpret it.",
+        "why": "A MAJOR version beyond what the reader implements (major 2) means it cannot be trusted to interpret the document. (2.0 is now a supported major \u2014 the container block \u2014 so the too-new major is 3.)",
         "error": "UnsupportedVersion",
         "document": {
           "schema": "chirograph",
-          "schema_version": "2.0",
+          "schema_version": "3.0",
           "hash_algorithm": "md5",
           "provenance_type": "observed-download",
           "record_accession": "GSE111111",
@@ -2026,6 +2124,112 @@
               "relpath": "GSE111111_processed.h5ad",
               "md5": "b1946ac92492d2347c6235b4d2611184",
               "size": 6
+            }
+          ]
+        }
+      },
+      {
+        "name": "crc32-without-container",
+        "why": "(2.0) A member carrying crc32 but no container to anchor it can never be confirmed (container-model \u00a78).",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "1.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "GSE111111",
+          "source_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE111nnn/GSE111111/suppl/",
+          "created": "2026-07-01T09:15:00Z",
+          "retrieved": "2026-07-01T09:15:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "8a19227a9fe82f6949e950ed5dceac0d",
+          "files": [
+            {
+              "relpath": "a.txt",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "crc32": "deadbeef"
+            }
+          ]
+        }
+      },
+      {
+        "name": "nested-containers",
+        "why": "(2.0) One source_root nested under another is ambiguous for member matching and is forbidden (container-model \u00a78).",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "2.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "10.5281/zenodo.7654321",
+          "source_url": "zenodo://10.5281/zenodo.7654321",
+          "created": "2026-09-06T00:00:00Z",
+          "retrieved": "2026-09-06T00:00:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "6939c8766c27a722dd5e6ab858edc1e5",
+          "containers": [
+            {
+              "source_root": "data.zip",
+              "format": "zip",
+              "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3"
+            },
+            {
+              "source_root": "data.zip/inner",
+              "format": "zip",
+              "md5": "591785b794601e212b260e25925636fd"
+            }
+          ],
+          "files": [
+            {
+              "relpath": "x",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "source_path": "data.zip/inner/x"
+            }
+          ]
+        }
+      },
+      {
+        "name": "orphan-container",
+        "why": "(2.0) A declared container with no member under its source_root (spec \u00a78).",
+        "error": "SchemaError",
+        "document": {
+          "schema": "chirograph",
+          "schema_version": "2.0",
+          "hash_algorithm": "md5",
+          "provenance_type": "observed-download",
+          "record_accession": "10.5281/zenodo.7654321",
+          "source_url": "zenodo://10.5281/zenodo.7654321",
+          "created": "2026-09-06T00:00:00Z",
+          "retrieved": "2026-09-06T00:00:00Z",
+          "generator": "chirograph 0.1.0",
+          "size": 6,
+          "nfiles": 1,
+          "body_hash": "6939c8766c27a722dd5e6ab858edc1e5",
+          "containers": [
+            {
+              "source_root": "data.zip",
+              "format": "zip",
+              "md5": "5eb63bbbe01eeed093cb22bb8f5acdc3"
+            },
+            {
+              "source_root": "empty.zip",
+              "format": "zip",
+              "md5": "591785b794601e212b260e25925636fd"
+            }
+          ],
+          "files": [
+            {
+              "relpath": "sampleA/matrix.mtx",
+              "md5": "b1946ac92492d2347c6235b4d2611184",
+              "size": 6,
+              "source_path": "data.zip/sampleA/matrix.mtx",
+              "crc32": "df2441b0"
             }
           ]
         }

@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import Final
 
 __all__ = [
+    "CONTAINER_FIELD_ORDER",
+    "CONTAINER_FORMATS",
+    "CONTAINER_FORMAT_FALLBACK_CLASS",
     "DEFAULT_HASH_ALGORITHM",
     "ENTRY_FIELD_ORDER",
     "HASH_ALGORITHMS",
@@ -18,12 +21,15 @@ __all__ = [
     "PROVENANCE_OBSERVED",
     "PROVENANCE_SELF",
     "PROVENANCE_TYPES",
+    "REQUIRED_CONTAINER_FIELDS",
     "RESERVED_HASH_ALGORITHMS",
     "SCHEMA",
     "SCHEMA_VERSION",
+    "SCHEMA_VERSION_MAJOR_2",
     "SCHEMA_VERSION_MINOR_1",
     "SUPPORTED_MAJOR",
     "SUPPORTED_MINOR",
+    "SUPPORTED_MINORS",
 ]
 
 #: Value of the internal ``schema`` field. The fallback identifier when the
@@ -41,13 +47,22 @@ SCHEMA_VERSION: Final = "1.0"
 #: The minor bump that adds the optional staleness fields (spec §8).
 SCHEMA_VERSION_MINOR_1: Final = "1.1"
 
-#: Highest ``schema_version`` this implementation can read. A differing *major*
-#: is a hard error; a higher *minor* is additive and merely relaxes unknown-field
-#: strictness (see docs/decisions.md D-07). Bumped to 1 for the 1.1 fields, so a
-#: ``1.1`` document is read *strictly* (its fields are known) and only ``1.2+`` is
-#: tolerated leniently.
-SUPPORTED_MAJOR: Final = 1
-SUPPORTED_MINOR: Final = 1
+#: The major bump that adds the ``containers`` block for ZIP/tar members
+#: (docs/container-model.md). A manifest is ``2.0`` iff it carries containers;
+#: everything else stays ``1.x`` and byte-identical.
+SCHEMA_VERSION_MAJOR_2: Final = "2.0"
+
+#: Highest implemented *minor* per major that this implementation reads strictly.
+#: A major beyond the keys is a hard error; a minor above its major's entry is
+#: additive and merely relaxes unknown-field strictness (docs/decisions.md D-07).
+#: Major 1 goes up to the staleness fields (1.1); major 2 is the container block
+#: (2.0).
+SUPPORTED_MINORS: Final[dict[int, int]] = {1: 1, 2: 0}
+
+#: Highest readable major, and its highest implemented minor — derived from
+#: :data:`SUPPORTED_MINORS` so there is one source of truth.
+SUPPORTED_MAJOR: Final = max(SUPPORTED_MINORS)
+SUPPORTED_MINOR: Final = SUPPORTED_MINORS[SUPPORTED_MAJOR]
 
 #: Compound extension identifying a manifest to humans and to globs (spec §1.1).
 MANIFEST_SUFFIX: Final = ".chiro.json"
@@ -114,7 +129,39 @@ ENTRY_FIELD_ORDER: Final[tuple[str, ...]] = (
     "version_id",
     "etag",
     "file_version",  # 1.1
+    "crc32",  # 2.0
 )
+
+#: Container descriptor field order (2.0, docs/container-model.md §3).
+CONTAINER_FIELD_ORDER: Final[tuple[str, ...]] = (
+    "source_root",
+    "format",
+    "md5",
+    "size",
+    "etag",
+    "version_id",
+)
+
+#: Required container fields.
+REQUIRED_CONTAINER_FIELDS: Final[frozenset[str]] = frozenset({"source_root", "format", "md5"})
+
+#: Blessed container formats, mapped to their confirm class (container-model §6):
+#: ``indexed`` (per-member CRC, metadata-only confirm — zip), ``sequential``
+#: (targeted read — tar), ``stream`` (whole-stream, download to confirm). An
+#: *unrecognised* format is treated as ``stream`` (opaque), never rejected — the
+#: forward-compatibility rule, so a newer format stays usable by an older reader.
+CONTAINER_FORMATS: Final[dict[str, str]] = {
+    "zip": "indexed",
+    "tar": "sequential",
+    "tar.gz": "stream",
+    "tar.bz2": "stream",
+    "tar.xz": "stream",
+    "tar.zst": "stream",
+}
+
+#: Confirm class assigned to a container whose ``format`` is not in
+#: :data:`CONTAINER_FORMATS` (spec §8 opaque fallback).
+CONTAINER_FORMAT_FALLBACK_CLASS: Final = "stream"
 
 #: Header fields that must be present.
 REQUIRED_HEADER_FIELDS: Final[frozenset[str]] = frozenset(

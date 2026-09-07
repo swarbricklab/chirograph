@@ -18,7 +18,13 @@ from __future__ import annotations
 
 import pytest
 
-from chirograph.canonical import canonical_text, compute_body_hash, dvc_dir_bytes, dvc_dir_hash
+from chirograph.canonical import (
+    canonical_document_text,
+    canonical_text,
+    compute_body_hash,
+    dvc_dir_bytes,
+    dvc_dir_hash,
+)
 from chirograph.errors import ChirographError
 from chirograph.hashing import hash_bytes
 from chirograph.manifest import Manifest
@@ -27,6 +33,7 @@ from chirograph.vectors import check_vectors, load_vectors
 
 VECTORS = load_vectors()
 CANONICAL_CASES = VECTORS["canonicalisation"]
+CONTAINER_CASES = VECTORS["container_canonicalisation"]
 
 
 def case_id(case: dict[str, object]) -> str:
@@ -43,9 +50,9 @@ def test_vector_file_is_pure_ascii() -> None:
 
 def test_vector_file_declares_its_own_freeze() -> None:
     assert VECTORS["format"] == "chirograph-test-vectors"
-    # Bumped to 1.1 when the staleness fields were added (spec §8); existing 1.0
-    # case values are unchanged — the set is a superset, not an edit in place.
-    assert VECTORS["spec_version"] == "1.1"
+    # Bumped to 2.0 when the container block was added (§8 / container-model);
+    # existing case values are unchanged — the set is a superset, not an edit in place.
+    assert VECTORS["spec_version"] == "2.0"
     assert "FROZEN" in VECTORS["$comment"]
 
 
@@ -81,6 +88,20 @@ def test_dvc_dir_interop_matches(case: dict) -> None:
     algorithm = case["hash_algorithm"]
     assert dvc_dir_bytes(case["input"], algorithm).decode("utf-8") == case["dvc_dir"]
     assert dvc_dir_hash(case["input"], algorithm) == case["dvc_dir_hash"]
+
+
+@pytest.mark.parametrize("case", CONTAINER_CASES, ids=case_id)
+def test_container_canonical_string_matches(case: dict) -> None:
+    """The 2.0 two-key {containers, files} canonical form (container-model §4)."""
+    assert canonical_document_text(case["containers"], case["files"]) == case["canonical"]
+
+
+@pytest.mark.parametrize("case", CONTAINER_CASES, ids=case_id)
+def test_container_body_hash_matches(case: dict) -> None:
+    assert (
+        compute_body_hash(case["files"], case["hash_algorithm"], containers=case["containers"])
+        == case["body_hash"]
+    )
 
 
 @pytest.mark.parametrize(

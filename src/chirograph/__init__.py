@@ -65,6 +65,7 @@ from .errors import (
 )
 from .hashing import hash_bytes, hash_file, hash_stream
 from .manifest import (
+    Container,
     FetchItem,
     FileEntry,
     Lint,
@@ -101,10 +102,11 @@ __all__ = [
     # references
     "ChiroRef",
     "ChirographError",
+    # model
+    "Container",
     "DvcError",
     # verification / comparison
     "EntryChange",
-    # model
     "FetchItem",
     "FileEntry",
     "FileResult",
