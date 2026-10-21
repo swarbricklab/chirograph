@@ -1,10 +1,14 @@
 # How to pull tracked data, and verify it is what you expect
 
-> **Status: mixed.** `chiro` commands are real. `archivefs` commands shown
-> (`get`, `check`, `verify`, `dvc`) exist in the shipped CLI. The `dvc pull` path via a
-> `chiro://` dependency is **aspirational** — archivefs currently registers the
-> `geo`, `zenodo`, `ega`, `bia` and `dbgap` protocols, not `chiro`. See
-> [`resolution-and-config.md`](resolution-and-config.md) §2.
+> **Status: built.** `chiro` commands are real, and the `archivefs` commands shown
+> (`get`, `check`, `verify`, `dvc`) ship in its CLI. The `dvc pull` path via a
+> `chiro://` dependency is **implemented**: archivefs registers `geo`, `zenodo`,
+> `mendeley`, `cbioportal`, `ega`, `bia`, `dbgap` **and `chiro`**, so a committed
+> `chiro://` pin resolves its manifest, routes to the archive the manifest's `concept`
+> names, and fetches — a reviewer pulls straight from the archive with no DVC remote.
+> What remains deferred is Chirograph's own **network registry** resolution of a bare
+> `chiro://<hash>` (fetching a manifest *by its content hash*); a committed in-repo
+> manifest needs none. See [`resolution-and-config.md`](resolution-and-config.md) §2.
 
 **The situation:** you have a repository — yours, a colleague's, or one attached to a
 paper — that tracks data with DVC and Chirograph. You want the data on disk, at the

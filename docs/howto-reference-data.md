@@ -90,7 +90,10 @@ chiro capture ./deposit \
 Note the source URL: `geo://GSE111111`, not the FTP path. The archive scheme is what
 `archivefs` resolves, so the manifest survives NCBI reorganising its directory layout
 — and GEO's `GSE111nnn` path sharding is exactly the sort of thing that changes.
-Available schemes are `geo://`, `zenodo://`, `ega://`, `bia://` and `dbgap://`.
+Available schemes are `geo://`, `zenodo://`, `mendeley://`, `cbioportal://`, `ega://`,
+`bia://` and `dbgap://`. (`mendeley://` and `cbioportal://` publish **sha256**, not
+md5, so a manifest built over them is a `sha256` manifest — see
+[`chiro-format-spec.md`](chiro-format-spec.md) §3.)
 
 A resolved fetch location looks like this, which you can check before fetching
 anything:

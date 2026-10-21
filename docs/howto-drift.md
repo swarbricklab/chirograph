@@ -1,9 +1,12 @@
 # How to detect that upstream data has changed
 
-> **Status: mixed.** `chiro capture`, `chiro diff` and `chiro verify` are real and do
-> the work today. The cheap staleness checks in §3 depend on the proposed `1.1` fields
-> ([`chiro-format-spec.md`](chiro-format-spec.md) §8) and on archive-specific support
-> in archivefs; those are **aspirational**.
+> **Status: mostly real.** `chiro capture`, `chiro diff` and `chiro verify` do the work
+> today. The cheap staleness checks in §3 use the `1.1` fields, which are now a **shipped
+> part of the format**, not a proposal ([`chiro-format-spec.md`](chiro-format-spec.md)
+> §8); and the archive-specific side ships in archivefs — `archivefs update` re-resolves
+> a manifest's `concept` against the live archive and reports what moved, `archivefs
+> check` compares a deposit to its manifest. What remains deferred is only the
+> network-registry automation layered on top.
 
 **The situation:** you depend on data you do not control. Some archives version their
 records; GEO famously does not, so a stable accession can mutate in place. You want to
@@ -75,7 +78,15 @@ This is the same discipline that keeps the `etag` field non-authoritative
 > archivefs's `archivefs check` (still to build), so the workflow below is only as
 > automated as that half.
 
-### Archives with immutable versions — Zenodo, Dataverse, Figshare, versioned S3
+### Archives with immutable versions — Zenodo, Mendeley Data, cBioPortal, Dataverse, Figshare, versioned S3
+
+The same concept/version split appears across archives that version their records.
+**Mendeley Data** has a concept DOI and per-version DOIs (`10.17632/<id>.<N>`).
+**cBioPortal** is versioned by its datahub's git history, so the concept is the study
+(`cbioportal:brca_metabric`) and the pinned version is a commit — `record_accession`
+is `brca_metabric@<commit sha>`. These are **sha256** manifests, but the drift logic is
+identical: record the version you observed plus the concept to re-resolve, then ask the
+archive whether the concept still points there.
 
 Zenodo distinguishes a *concept* DOI (always the latest) from a *version* DOI
 (immutable). The manifest records the version it observed, plus the concept to

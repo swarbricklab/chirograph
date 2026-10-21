@@ -128,8 +128,11 @@ assert report.ok, report.explain()
 A Chirograph manifest is a JSON file that mirrors DVC's `.dir` format (`relpath` /
 `md5` entries, plus `size`) with a header block adding provenance, a two-path model
 (where a file lives in the repository vs. where it materialises in your workspace),
-and a body-integrity hash for standalone use. See
-[`docs/chiro-format-spec.md`](docs/chiro-format-spec.md).
+and a body-integrity hash for standalone use. The per-file digest is **`md5` or
+`sha256`** (one `hash_algorithm` per manifest) — so an archive that publishes only
+sha256, such as a git-lfs source, is pinned as faithfully as an md5 one. Schema
+**`2.0`** adds an optional `containers` block for member-granular provenance of ZIP/tar
+deposits. See [`docs/chiro-format-spec.md`](docs/chiro-format-spec.md).
 
 Canonicalisation is the fragility point — a reimplementation that canonicalises
 *almost* identically produces non-matching hashes silently — so it is **frozen and
@@ -145,9 +148,14 @@ can be diffed rather than guessed at.
 
 ## Status
 
-**Format frozen; reference library and CLI implemented.** The registry layer is
-deliberately deferred — an in-repo manifest already does most of the job, and the
-registry is an optimisation over that baseline rather than a prerequisite.
+**Format frozen; reference library and CLI implemented, through schema `2.0`.** All
+three schema versions are read and written — `1.0` (core), `1.1` (staleness fields)
+and `2.0` (the container block, shipped in v0.2.0) — with md5 *and* sha256 digests, and
+all twelve CLI subcommands (`write`, `capture`, `verify`, `validate`, `info`, `ls`,
+`diff`, `ref`, `remap`, `dvc-dir`, `schema`, `test-vectors`). What remains deferred is
+the **registry** layer (network resolution of a `chiro://` reference) — an in-repo
+manifest already does most of the job, so the registry is an optimisation over that
+baseline, not a prerequisite.
 
 ### How-to
 
@@ -165,7 +173,7 @@ registry is an optimisation over that baseline rather than a prerequisite.
 - **`chiro://` resolution and config:** [`docs/resolution-and-config.md`](docs/resolution-and-config.md) *(design, largely unbuilt)*
 - **Updatability & `dvc update`:** [`docs/updatability-and-dvc-update.md`](docs/updatability-and-dvc-update.md) *(design; cross-project, with measured findings)*
 - **Drift-check & update design:** [`docs/design-check-and-update.md`](docs/design-check-and-update.md) *(design, unbuilt)*
-- **Container model (ZIP members, schema 2.0):** [`docs/container-model.md`](docs/container-model.md) *(design of record, unbuilt)*
+- **Container model (ZIP members, schema 2.0):** [`docs/container-model.md`](docs/container-model.md) — the design reasoning; **implemented in v0.2.0**, normative in the spec §9
 - **Manifest registry design:** [`docs/manifest-registry-design.md`](docs/manifest-registry-design.md) *(design, deferred)*
 - **Implementation plan / status:** [`docs/plan.md`](docs/plan.md)
 - **Decisions taken while implementing:** [`docs/decisions.md`](docs/decisions.md) — dated record; its spec section numbers refer to spec v0.3, before the split
@@ -180,7 +188,11 @@ registry is an optimisation over that baseline rather than a prerequisite.
 ## Related projects
 
 - **[archivefs](https://github.com/swarbricklab/archivefs)** — a set of read-only
-  fsspec filesystems for scientific data archives (EGA, Zenodo, GEO, …), consumable
-  by DVC. `archivefs` *optionally* reads Chirograph manifests to gain download-free
-  checksums and friendly workspace layout, but works without them. Chirograph is the
-  manifest format; `archivefs` is the data-access layer.
+  fsspec filesystems for scientific data archives (EGA, Zenodo, Mendeley Data,
+  cBioPortal, GEO, BioImage Archive), consumable by DVC. `archivefs` *optionally* reads
+  Chirograph manifests to gain download-free checksums and a friendly workspace layout,
+  but works without them. Chirograph is the manifest format; `archivefs` is the
+  data-access layer, and it is the intended caller of `fetch_plan()`. Its sha256-based
+  backends (Mendeley, cBioPortal) pin to a `sha256` manifest; nothing in Chirograph is
+  archive-specific — the `concept` CURIE is a free-form string (`mendeley:…`,
+  `cbioportal:…`, `doi:…`, `geo:…`), so a new archive needs no change here.
