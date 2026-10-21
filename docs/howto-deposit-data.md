@@ -3,8 +3,8 @@
 > **Status: real.** Every command here runs today against the shipped CLI.
 
 **The situation:** you generated data, you are depositing it to GEO / EGA / BIA /
-Zenodo, and you want to be able to prove that the bytes in the archive are the bytes
-your analysis used.
+Zenodo / Mendeley Data, and you want to be able to prove that the bytes in the archive
+are the bytes your analysis used.
 
 **What you get:** a `self-deposited` manifest that is the authoritative record of your
 own data — and a check that the archive stored what you actually sent it.

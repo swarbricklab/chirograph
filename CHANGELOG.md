@@ -7,6 +7,24 @@ the **`.chiro.json` format version** (`schema_version`) it implements.
 
 ## [Unreleased]
 
+### Documentation
+
+- Refreshed the docs to match the implemented state — "the tool is more mature than the
+  docs implied". Corrected stale *unbuilt / aspirational* markers: the schema `2.0`
+  **container model** (shipped in v0.2.0, normative in the spec §9) and the
+  `chiro://`-dependency **`dvc pull`** path (implemented in archivefs, which now
+  registers `chiro`) are described as built; genuinely-deferred items (network
+  **registry** resolution of a bare `chiro://<hash>`, `chiro freeze`) stay marked.
+- Documented that the `md5`-**or-`sha256`** choice makes sha256-only archives
+  first-class, and that `archivefs`' new **Mendeley Data** and **cBioPortal** backends
+  (sha256, with free-form `concept` CURIEs) pin without any Chirograph change.
+
+### Tests
+
+- Added a regression test pinning the "new backend" guarantee: a `sha256` manifest with
+  a non-`doi:` concept CURIE (`cbioportal:…`, `mendeley:…`) and a git-ref
+  `record_accession` round-trips and validates.
+
 ## [0.2.0] — 2026-09-07
 
 A backward-compatible release: the library reads and writes `.chiro.json` schema

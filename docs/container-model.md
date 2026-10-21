@@ -1,10 +1,11 @@
 # Container model — ZIP-member identity and download-free confirmation (`2.0`)
 
-> **Status: design of record, not yet implemented.** This note pins the `schema_version`
-> `2.0` design agreed in [issue #8](https://github.com/Swarbricklab/chirograph/issues/8)
-> so it can be reviewed *before* the canonicalisation core is touched. Once approved it
-> becomes normative and the field/rule definitions move into
-> [`chiro-format-spec.md`](chiro-format-spec.md); this note keeps the reasoning.
+> **Status: implemented and released in v0.2.0** (`schema_version` `2.0`). The design
+> was agreed in [issue #8](https://github.com/Swarbricklab/chirograph/issues/8); the
+> normative field and rule definitions now live in
+> [`chiro-format-spec.md`](chiro-format-spec.md) §9, and the library ships the
+> `Container` dataclass plus container-aware `body_hash`, `verify`, `diff` and
+> `chiro info`. This note keeps the design *reasoning* behind the spec.
 
 ## 1. What it's for
 

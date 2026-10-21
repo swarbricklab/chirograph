@@ -255,6 +255,34 @@ def test_minor_1_null_header_fields_rejected() -> None:
             Manifest.from_dict(document(schema_version="1.1", **{field_name: None}))
 
 
+SHA256_A = "a" * 64  # a 64-hex sha256 digest
+
+
+def test_sha256_manifest_with_a_non_doi_concept_round_trips() -> None:
+    # The "new backend just works" guarantee. archivefs' sha256-based backends
+    # (Mendeley Data, cBioPortal) need no format change: a `sha256` manifest with a
+    # free-form `concept` CURIE and — for cBioPortal — a git-ref `record_accession`
+    # must round-trip unchanged. Nothing in Chirograph is archive-specific, so this
+    # pins that a new archive scheme is representable without touching the format.
+    for concept, accession in [
+        ("cbioportal:brca_metabric", "brca_metabric@1ea328cd77574cf31ccca4224a1d015539c44928"),
+        ("mendeley:10.17632/yzxtxn4nmd", "10.17632/yzxtxn4nmd/4"),
+    ]:
+        manifest = Manifest(
+            provenance_type=PROVENANCE_OBSERVED,
+            hash_algorithm="sha256",
+            files=[FileEntry("data_cna.txt", SHA256_A, 123)],
+            concept=concept,
+            record_accession=accession,
+        )
+        back = Manifest.from_dict(manifest.to_dict())
+        assert back.hash_algorithm == "sha256"
+        assert back.concept == concept
+        assert back.record_accession == accession
+        assert len(back.files[0].digest) == 64
+        assert back.schema_version == "1.1"  # `concept` is a 1.1 field
+
+
 def test_minor_1_null_file_version_is_treated_as_absent() -> None:
     # An entry optional set to null is absorbed as absent — the same lenience the
     # existing version_id/etag entry optionals have. So file_version follows its
