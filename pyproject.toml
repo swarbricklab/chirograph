@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=64", "setuptools-scm>=8"]
+# setuptools-scm was never wired up (the version is static below), so it is dropped;
+# setuptools >= 77 gives the SPDX `license` / `license-files` metadata (PEP 639).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,16 +10,23 @@ version = "0.2.0"
 description = "Portable, content-addressed manifests for scientific datasets"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Swarbrick Lab" }]
 keywords = ["manifest", "checksum", "provenance", "dvc", "reproducibility", "data"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Topic :: System :: Archiving",
+  "Typing :: Typed",
 ]
 # Deliberately EMPTY. chirograph is the reference implementation of a file
 # format; consumers (notably archivefs) should be able to depend on it without
@@ -45,6 +54,9 @@ chirograph = "chirograph.cli:main"
 [project.urls]
 Homepage = "https://github.com/swarbricklab/chirograph"
 Repository = "https://github.com/swarbricklab/chirograph"
+Issues = "https://github.com/swarbricklab/chirograph/issues"
+Changelog = "https://github.com/swarbricklab/chirograph/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/swarbricklab/chirograph/tree/main/docs"
 
 [tool.setuptools.packages.find]
 where = ["src"]
