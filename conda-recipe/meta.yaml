@@ -1,0 +1,59 @@
+{# conda-forge recipe for chirograph.                                             #}
+{# Copy into conda-forge/staged-recipes as `recipes/chirograph/meta.yaml` once    #}
+{# chirograph is on PyPI. See ../RELEASING.md. Fill two placeholders at submit    #}
+{# time: `version` (the released PyPI version) and `sha256` (of the PyPI sdist).   #}
+{% set name = "chirograph" %}
+{% set version = "0.2.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.org/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  sha256: 0000000000000000000000000000000000000000000000000000000000000000
+
+build:
+  noarch: python
+  number: 0
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  entry_points:
+    - chiro = chirograph.cli:main
+    - chirograph = chirograph.cli:main
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=77
+  run:
+    - python >=3.10
+  # The core has zero required dependencies by design (docs/decisions.md D-08).
+  # Optional extras: `dvc` -> pyyaml >=5.1; `schema` -> jsonschema >=4.0.
+
+test:
+  imports:
+    - chirograph
+  commands:
+    - chiro --help
+    - chiro test-vectors --check   # the frozen canonicalisation conformance gate
+    - pip check
+  requires:
+    - pip
+
+about:
+  home: https://github.com/swarbricklab/chirograph
+  summary: Portable, content-addressed manifests for scientific datasets
+  description: |
+    Chirograph describes a dataset's files, their checksums, and their provenance in
+    a portable, content-addressed `.chiro.json` manifest, so any copy can be verified
+    and any drift from it detected. The core is a zero-dependency reference
+    implementation of the file format.
+  license: MIT
+  license_file: LICENSE
+  doc_url: https://github.com/swarbricklab/chirograph/tree/main/docs
+  dev_url: https://github.com/swarbricklab/chirograph
+
+extra:
+  recipe-maintainers:
+    - johnyaku
