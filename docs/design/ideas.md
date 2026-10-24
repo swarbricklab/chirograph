@@ -7,7 +7,7 @@ Things worth doing that are **out of scope for the current plan**, recorded whil
 implementing it. Ordered by (my estimate of)
 value-per-effort within each section.
 
-Decisions actually taken are in [`decisions.md`](decisions.md); this file is
+Decisions actually taken are in [`decisions.md`](../decisions.md); this file is
 strictly speculative.
 
 ---
@@ -15,7 +15,7 @@ strictly speculative.
 ## 1. Format & correctness
 
 ### 1.1 Make the canonical-document hash the registry's address ★
-Follows directly from [D-09](decisions.md#d-09). The specified `chiro://` address
+Follows directly from [D-09](../decisions.md#d-09). The specified `chiro://` address
 is the manifest's whole-file hash, which changes when somebody re-indents the JSON
 — and manifests live in Git, where that happens. `canonical_ref()` is already
 implemented and is invariant under reformatting.
@@ -35,7 +35,7 @@ or Go or R implementation can be checked without writing Python. Perhaps 100 lin
 and it is what makes the freeze actually useful to anyone else.
 
 ### 1.3 Per-entry `hash_algorithm`, if ETag ever has to come back
-[D-04](decisions.md#d-04) rejects `hash_algorithm: "etag"` wholesale. If a real
+[D-04](../decisions.md#d-04) rejects `hash_algorithm: "etag"` wholesale. If a real
 use case appears (a genuinely un-downloadable multi-TB S3 source), the honest
 shape is a per-entry `hash_algorithm` under a `schema_version` bump, so a mixed
 manifest says per file which entries are verifiable and which are only
@@ -77,7 +77,7 @@ report *format* defined before the registry exists means consumers can start
 collecting drift observations locally today, into a file, for later submission.
 
 **Design this format's path encoding deliberately.** It is the first thing here that
-will cross a language boundary, and [D-21](decisions.md#d-21) leaves a known gap for
+will cross a language boundary, and [D-21](../decisions.md#d-21) leaves a known gap for
 it: a path whose bytes are not valid UTF-8 currently appears in `--json` as a
 `\uDCxx` escape, which is valid JSON syntax and lossless in Python but which
 RFC 8259 §8.2 marks non-interoperable — Go substitutes U+FFFD and `serde_json`
@@ -145,7 +145,7 @@ parser with a few lines and no runtime dependency. Nice-to-have.
 ### 3.1 The CLI is already the CI gate ★
 Worth noticing before designing registry CI from scratch: registry design §6's
 Tier-1 check *is* `chiro validate` (exit 1 on a finding, 2 on a tool failure —
-[D-16](decisions.md#d-16)), and Tier-2b *is* `chiro verify`, which already reports
+[D-16](../decisions.md#d-16)), and Tier-2b *is* `chiro verify`, which already reports
 `tier1` / `tier2b-full` / `tier2b-sampled` in the design note's own vocabulary. A
 registry's workflow should be a thin wrapper over these two commands rather than a
 reimplementation, so that the gate and the local tool can never disagree about
@@ -157,7 +157,7 @@ Similarly, §8's "cheapest CI checks first" is already the layering:
 
 ### 3.2 Sampling as a policy, recorded per manifest
 `--sample-fraction` is deterministic and seeded from `body_hash`
-([D-12](decisions.md#d-12)), so a registry can record *which* files a sampled
+([D-12](../decisions.md#d-12)), so a registry can record *which* files a sampled
 verification covered without storing a list — just the fraction and the manifest
 hash. That makes `tier2b-sampled` auditable after the fact by anyone, which is
 what stops it being a euphemism.
@@ -179,7 +179,7 @@ NFC idempotence, `canonicalise(x) == canonicalise(shuffle(x))` — would cover t
 ones we did not. Cheap, and the natural complement to a fixed vector set.
 
 ### 4.2 Interop tests against older DVC versions
-[D-01](decisions.md#d-01) and [D-02](decisions.md#d-02) came from checking
+[D-01](../decisions.md#d-01) and [D-02](../decisions.md#d-02) came from checking
 dvc 3.66.1. The `.dir` format has demonstrably changed before (`size` used to be
 present in some form), so the DVC-interop function is pinned to one version's
 behaviour. A matrix over two or three DVC majors would tell us how stable

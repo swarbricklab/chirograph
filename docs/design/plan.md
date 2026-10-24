@@ -3,12 +3,12 @@
 High-level checklist for the Chirograph format, library, and (deferred) registry.
 Detail lives in the design docs — this file links rather than repeats.
 
-- **Format (normative):** [`chiro-format-spec.md`](chiro-format-spec.md)
-- **Format rationale:** [`chiro-format-rationale.md`](chiro-format-rationale.md)
-- **`chiro://` resolution & config:** [`resolution-and-config.md`](resolution-and-config.md)
-- **Registry design:** [`manifest-registry-design.md`](manifest-registry-design.md)
+- **Format (normative):** [`chiro-format-spec.md`](../chiro-format-spec.md)
+- **Format rationale:** [`chiro-format-rationale.md`](../chiro-format-rationale.md)
+- **`chiro://` resolution & config:** [`resolution-and-config.md`](../resolution-and-config.md)
+- **Registry design:** [`manifest-registry-design.md`](../manifest-registry-design.md)
 - **How-to guides:** `howto-reference-data`, `howto-deposit-data`, `howto-pull-and-verify`, `howto-publish`, `howto-drift`, `howto-adopt-dvc`
-- **Decisions taken while implementing:** [`decisions.md`](decisions.md)
+- **Decisions taken while implementing:** [`decisions.md`](../decisions.md)
 - **Ideas & extensions (not built):** [`ideas.md`](ideas.md)
 - **Sibling project (data access):** [`archivefs`](https://github.com/swarbricklab/archivefs)
 
@@ -107,7 +107,7 @@ same thing as correct code. That second repeat prompted a different response tha
 another review: `chiro ref`'s flag combinations are now enumerated as a test matrix,
 verified to fail (6 cases) when the regression is deliberately reintroduced. The findings, including the
 several places where a review disproved a claim in my own commit messages, are in
-[`decisions.md`](decisions.md).
+[`decisions.md`](../decisions.md).
 
 That history is the honest summary of how much of this was got right first time:
 the tests passing was never the same thing as the code being correct.

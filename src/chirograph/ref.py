@@ -12,7 +12,7 @@ manifests that list the same files but point at different ``source_url``\\ s.
 Only reference *syntax*, self-validation, and the registry's sharded path layout
 live here. **Resolution** — walking an ordered registry list over the network,
 local caching — is Milestone 2 and lands in the separate ``chirograph-registry``
-repo (plan.md §"Milestone 2"). The split is deliberate: syntax is part of the
+repo (docs/design/plan.md §"Milestone 2"). The split is deliberate: syntax is part of the
 format and must be frozen with it; resolution is policy and infrastructure.
 
 .. rubric:: The reformatting hazard
@@ -28,7 +28,7 @@ therefore offers both:
 * :func:`canonical_ref` — a hash over the manifest's *canonical document form*,
   which is invariant under reformatting, key reordering and indentation changes.
 
-See docs/decisions.md D-09 and docs/ideas.md for the recommendation to make the
+See docs/decisions.md D-09 and docs/design/ideas.md for the recommendation to make the
 canonical form load-bearing when the registry is built.
 """
 

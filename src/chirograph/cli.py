@@ -82,7 +82,7 @@ def emit_json(payload: object, stream: TextIO) -> None:
     to name a file precisely.
 
     Consumers in other languages should treat such entries as opaque. The registry's
-    drift-report format is where this needs a real answer (docs/ideas.md): it should
+    drift-report format is where this needs a real answer (docs/design/ideas.md): it should
     carry the raw bytes in a dedicated, explicitly-encoded field rather than trying
     to squeeze them into a JSON string.
     """
