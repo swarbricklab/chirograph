@@ -1,6 +1,6 @@
 # Decisions log
 
-Every decision taken while implementing [`plan.md`](plan.md) that was **not**
+Every decision taken while implementing [`plan.md`](design/plan.md) that was **not**
 settled by the design docs — either because the plan explicitly left it open, or
 because implementing it turned up something the docs got wrong.
 
@@ -192,7 +192,7 @@ alternative was a manifest nobody can verify.
 **How to reverse.** If a genuine use case appears, add it under a
 `schema_version` bump with a per-entry `hash_algorithm`, so a mixed manifest is
 honest per file rather than degrading wholesale. Sketched in
-[`ideas.md`](ideas.md).
+[`ideas.md`](design/ideas.md).
 
 ---
 
@@ -310,7 +310,7 @@ load-bearing for registry addressing, and keep the whole-file hash for the `.dvc
 needs a JSON parse rather than a byte comparison; the benefit is that the
 registry's primary key stops depending on whitespace. Not decided here because it
 is a registry decision and Milestone 2 is deferred. Expanded in
-[`ideas.md`](ideas.md).
+[`ideas.md`](design/ideas.md).
 
 ---
 
@@ -626,7 +626,7 @@ portable, and tell consumers in other languages to treat them as opaque.
 (registry design §7b), which is the thing that will cross language boundaries. It
 should carry the raw bytes in a dedicated, explicitly-encoded field — percent-
 encoded or base64 — rather than trying to squeeze them into a JSON string. Recorded
-in [`ideas.md`](ideas.md) §2.1.
+in [`ideas.md`](design/ideas.md) §2.1.
 
 ---
 
@@ -870,7 +870,7 @@ check used `getattr(…, None)`, which reports a *missing* attribute as "got Non
 `--check --no-validate` was accepted and ignored; and two of my own claims were
 wrong again — a `cmd_ref` comment said the single read "halves the work" when
 measurement shows it saves 0.02 s of a 10 s run, and D-21's pointer to
-[`ideas.md`](ideas.md) §2.1 was dangling because I never wrote the content it
+[`ideas.md`](design/ideas.md) §2.1 was dangling because I never wrote the content it
 deferred there. All fixed; §2.1 now carries the actual proposal.
 
 This pass also confirmed D-21's two claims are correct as written, that `emit_json`

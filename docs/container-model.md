@@ -4,8 +4,12 @@
 > was agreed in [issue #8](https://github.com/Swarbricklab/chirograph/issues/8); the
 > normative field and rule definitions now live in
 > [`chiro-format-spec.md`](chiro-format-spec.md) §9, and the library ships the
-> `Container` dataclass plus container-aware `body_hash`, `verify`, `diff` and
-> `chiro info`. This note keeps the design *reasoning* behind the spec.
+> `Container` dataclass (plus per-member `crc32` and the `format` → `confirm_class`
+> mapping) with container-aware `body_hash`, `verify`, `diff` and `chiro info`. What
+> chirograph does **not** do is the *download-free confirm operation* against a live
+> container (reading a ZIP's central directory to cross-check `crc32`): chirograph owns
+> the model and the `confirm_class` mapping, the retrieval is the consumer's job (e.g.
+> archivefs). This note keeps the design *reasoning* behind the spec.
 
 ## 1. What it's for
 

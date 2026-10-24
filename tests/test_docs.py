@@ -17,9 +17,12 @@ from pathlib import Path
 
 import pytest
 
-DOCS = sorted((Path(__file__).parent.parent / "docs").glob("*.md"))
+DOCS = sorted((Path(__file__).parent.parent / "docs").rglob("*.md"))
 README = Path(__file__).parent.parent / "README.md"
 ALL_MD = [*DOCS, README]
+#: Resolve a doc by bare filename regardless of which subfolder it lives in
+#: (design notes live under docs/design/; see README "Reference").
+DOCS_BY_NAME = {p.name: p for p in DOCS}
 
 #: Documents that describe unbuilt design. They may name things that do not exist,
 #: provided they say so — which :func:`test_aspirational_docs_say_so` checks.
@@ -144,7 +147,7 @@ def test_manifest_outputs_are_not_accession_named(doc: Path) -> None:
 @pytest.mark.parametrize("doc", sorted(ASPIRATIONAL))
 def test_aspirational_docs_say_so(doc: str) -> None:
     """A doc describing unbuilt design must declare it in the first 40 lines."""
-    text = (Path(__file__).parent.parent / "docs" / doc).read_text()
+    text = DOCS_BY_NAME[doc].read_text()
     head = "\n".join(text.splitlines()[:40]).lower()
     assert any(w in head for w in ("aspirational", "not built", "deferred", "design")), (
         f"{doc} describes unbuilt behaviour without saying so up front"
