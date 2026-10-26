@@ -1,29 +1,26 @@
 # Publish chirograph to PyPI via trusted publishing (OIDC — no API token).
 #
-# DORMANT until PyPI is set up. It runs only on manual dispatch, so it never fails
-# unexpectedly. To go live:
+# ARMED: a published GitHub Release now triggers a build + upload. For that upload
+# to succeed, the PyPI side must be configured first (otherwise the `publish` job
+# fails at the OIDC exchange with `invalid-publisher`):
 #
-#   1. Create the `chirograph` project on PyPI (a first manual upload, or a
-#      pending publisher).
-#   2. On PyPI → the project → Publishing, add a **trusted publisher**:
-#        owner:        Swarbricklab
-#        repository:   chirograph
-#        workflow:     publish.yml
-#        environment:  pypi
-#   3. Create a GitHub environment named `pypi` (Settings → Environments).
-#   4. Uncomment the `release:` trigger below so a published GitHub Release
-#      publishes automatically. (Leave `workflow_dispatch` for manual re-runs.)
-#
-# Until step 4, cut releases as now (tag + GitHub Release); the git dependency
-# `pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@<tag>"`
-# is the supported install.
+#   1. Register a pending publisher on PyPI (https://pypi.org/manage/account/publishing/):
+#        PyPI Project Name: chirograph
+#        owner:             swarbricklab
+#        repository:        chirograph
+#        workflow:          publish.yml
+#        environment:       pypi
+#   2. Create a GitHub environment named `pypi` (Settings → Environments).
+#   3. Cut the release: tag `vX.Y.Z` + publish a GitHub Release. The first upload
+#      creates the project and promotes the pending publisher. `workflow_dispatch`
+#      stays for manual re-runs.
 
 name: publish
 
 on:
   workflow_dispatch: {}
-  # release:
-  #   types: [published]
+  release:
+    types: [published]
 
 permissions:
   contents: read
