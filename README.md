@@ -5,9 +5,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/chirograph.svg)](https://pypi.org/project/chirograph/)
 [![Python versions](https://img.shields.io/pypi/pyversions/chirograph.svg)](https://pypi.org/project/chirograph/)
 [![License: MIT](https://img.shields.io/pypi/l/chirograph.svg)](https://github.com/swarbricklab/chirograph/blob/main/LICENSE)
-<!-- CI badge renders only on a public repo (GitHub 404s it anonymously while private):
 [![CI](https://github.com/swarbricklab/chirograph/actions/workflows/ci.yml/badge.svg)](https://github.com/swarbricklab/chirograph/actions/workflows/ci.yml)
--->
 
 
 A *chirograph* was a medieval document written in duplicate with a word inscribed
