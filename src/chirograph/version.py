@@ -7,7 +7,7 @@ __all__ = ["GENERATOR", "__version__", "version"]
 #: Used only when the package is not installed (running straight from a source
 #: tree, so ``importlib.metadata`` has nothing). MUST match ``pyproject`` on every
 #: release; ``tests/test_version.py`` enforces that so it cannot drift again.
-_FALLBACK = "0.2.0"
+_FALLBACK = "0.2.1"
 
 
 def _detect() -> str:

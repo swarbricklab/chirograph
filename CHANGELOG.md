@@ -7,6 +7,20 @@ the **`.chiro.json` format version** (`schema_version`) it implements.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-26
+
+A packaging and documentation release that prepares chirograph for its first
+publication to PyPI and conda-forge. **No library API or `.chiro.json` format change:**
+every `0.2.0` manifest and caller is unaffected.
+
+### Packaging
+
+- PEP 639 license metadata (`license = "MIT"`, `license-files`), a complete set of trove
+  classifiers (Python 3.10–3.13, OS Independent, `Typing :: Typed`), and project URLs
+  (Issues, Changelog, Documentation). A `py.typed` marker ships in the package.
+- A conda-forge recipe (`conda-recipe/meta.yaml`) and a `RELEASING.md` documenting the
+  PyPI (Trusted Publishing) and conda-forge path.
+
 ### Documentation
 
 - Refreshed the docs to match the implemented state — "the tool is more mature than the
@@ -18,6 +32,14 @@ the **`.chiro.json` format version** (`schema_version`) it implements.
 - Documented that the `md5`-**or-`sha256`** choice makes sha256-only archives
   first-class, and that `archivefs`' new **Mendeley Data** and **cBioPortal** backends
   (sha256, with free-form `concept` CURIEs) pin without any Chirograph change.
+- Trimmed the README and moved the internal design notes (`ideas.md`, `plan.md`) under
+  `docs/design/`, keeping the top-level docs surface to the spec, rationale, decisions,
+  and how-tos.
+
+### Fixed
+
+- The source-tree version fallback (`version.py` `_FALLBACK`) still read `0.1.0` after
+  the 0.2.0 release; corrected, and `tests/test_version.py` now guards it against drift.
 
 ### Tests
 
@@ -91,6 +113,7 @@ library, and the CLI.
 - Not yet on PyPI; install from the tag
   (`pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.1.0"`).
 
-[Unreleased]: https://github.com/Swarbricklab/chirograph/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Swarbricklab/chirograph/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Swarbricklab/chirograph/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Swarbricklab/chirograph/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Swarbricklab/chirograph/releases/tag/v0.1.0

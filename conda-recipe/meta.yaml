@@ -3,7 +3,7 @@
 {# chirograph is on PyPI. See ../RELEASING.md. Fill two placeholders at submit    #}
 {# time: `version` (the released PyPI version) and `sha256` (of the PyPI sdist).   #}
 {% set name = "chirograph" %}
-{% set version = "0.2.0" %}
+{% set version = "0.2.1" %}
 
 package:
   name: {{ name|lower }}
