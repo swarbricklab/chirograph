@@ -37,7 +37,7 @@ pip install chirograph[schema]    # + JSON Schema validation
 Until the first PyPI release, install from a tag instead:
 
 ```bash
-pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.2.0"
+pip install "chirograph @ git+https://github.com/Swarbricklab/chirograph@v0.2.1"
 ```
 
 For development, `environment.yaml` builds a conda environment with the extras and
